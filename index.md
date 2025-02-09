@@ -8,22 +8,21 @@ title: Water Level Difference
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Water Level Difference</title>
+    <title>Corrib Flow Estimate</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-    <h1>Water Level Difference Calculator</h1>
-    <!-- label for="csvUrl1">CSV URL 1:</label>
-    <input type="text" id="csvUrl1" placeholder="Enter first CSV URL"><br>
-    <label for="csvUrl2">CSV URL 2:</label>
-    <input type="text" id="csvUrl2" placeholder="Enter second CSV URL"><br -->
-    <button id="compareButton">Compare</button>
+    <h1>Corrib Flow Estimate</h1>
+    <h2 id="latestFlowRate">Latest Flow Rate: Loading...</h2>
     <canvas id="chart"></canvas>
     <table id="results">
         <tr><th>Datetime</th><th>Difference</th><th>Flow Rate</th></tr>
     </table>
 
     <script>
+        const url1 = "https://waterlevel.ie/data/day/30089_OD.csv";
+        const url2 = "https://waterlevel.ie/data/day/30099_OD.csv";
+
         async function fetchCSV(url) {
             const proxy = "https://api.allorigins.win/raw?url=";
             const response = await fetch(proxy + encodeURIComponent(url));
@@ -54,19 +53,15 @@ title: Water Level Difference
             return differences;
         }
 
-        document.getElementById("compareButton").addEventListener("click", async () => {
-            //const url1 = document.getElementById("csvUrl1").value;
-            //const url2 = document.getElementById("csvUrl2").value;
-            const url1 = "https://waterlevel.ie/data/day/30089_OD.csv";
-            const url2 = "https://waterlevel.ie/data/day/30099_OD.csv";
-            
+        async function loadAndCompare() {
             const data1 = await fetchCSV(url1);
             const data2 = await fetchCSV(url2);
             
             const differences = computeDifferences(data1, data2);
             displayResults(differences);
             plotChart(differences);
-        });
+            updateLatestFlowRate(differences);
+        };
 
         function displayResults(differences) {
             const table = document.getElementById("results");
@@ -100,6 +95,13 @@ title: Water Level Difference
                 }
             });
         }
+        function updateLatestFlowRate(differences) {
+            if (differences.length > 0) {
+                const latest = differences[differences.length - 1];
+                document.getElementById("latestFlowRate").textContent = `Latest Flow Rate: ${latest.flowRate.toFixed(0)} cumec`;
+            }
+        }
+        window.onload = loadAndCompare;
     </script>
 </body>
 </html>
