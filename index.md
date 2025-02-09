@@ -15,7 +15,7 @@ title: Water Level Difference
     <h2 id="latestFlowRate">Latest Flow Rate: Loading...</h2>
     <canvas id="chart"></canvas>
     <table id="results">
-        <tr><th>Datetime</th><th>Difference</th><th>Flow Rate</th></tr>
+        <tr><th>Datetime</th><th>Difference</th><th>Flow Rate (cumec)</th></tr>
     </table>
 
     <script>
@@ -50,19 +50,24 @@ title: Water Level Difference
                 }
             }
             // Sort by datetime
-            differences.sort((a, b) => new Date(a.datetime) - new Date(b.datetime));
+            differences.sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
             return differences;
         }
 
+        function formatTime(datetime) {
+            const date = new Date(datetime);
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
         function timeAgo(datetime) {
             const now = new Date();
             const past = new Date(datetime);
             const diffMs = now - past;
             const diffMinutes = Math.floor(diffMs / 60000);
             if (diffMinutes < 1) return "just now";
-            if (diffMinutes < 60) return `${diffMinutes} minutes ago`;
+            if (diffMinutes < 60) return `${diffMinutes} minutes ago (${formatTime(datetime)})`;
             const diffHours = Math.floor(diffMinutes / 60);
-            if (diffHours < 24) return `${diffHours} hours ago`;
+            return `${diffHours} hours ago (${formatTime(datetime)})`;
+            if (diffHours < 24) return `${diffHours} hours ago (${formatTime(datetime)})`;
             const diffDays = Math.floor(diffHours / 24);
             return `${diffDays} days ago`;
         }
@@ -79,7 +84,7 @@ title: Water Level Difference
 
         function displayResults(differences) {
             const table = document.getElementById("results");
-            table.innerHTML = "<tr><th>Datetime</th><th>Difference</th><th>Flow Rate</th></tr>";
+            table.innerHTML = "<tr><th>Datetime</th><th>Difference</th><th>Flow Rate (cumec)</th></tr>";
             for (let row of differences) {
                 table.innerHTML += `<tr><td>${row.datetime}</td><td>${row.difference.toFixed(2)}</td><td>${row.flowRate.toFixed(2)}</td></tr>`;
             }
@@ -94,7 +99,7 @@ title: Water Level Difference
                 data: {
                     labels: labels,
                     datasets: [{
-                        label: "Flow Rate",
+                        label: "Flow Rate (cumec)",
                         data: data,
                         borderColor: "blue",
                         fill: false
@@ -102,18 +107,21 @@ title: Water Level Difference
                 },
                 options: {
                     responsive: true,
+                    plugins: {
+                        legend: { display: false }
+                    },
                     scales: {
                         x: { title: { display: true, text: "Datetime" } },
-                        y: { title: { display: true, text: "Flow Rate" } }
+                        y: { title: { display: true, text: "Flow Rate (cumec)" } }
                     }
                 }
             });
         }
         function updateLatestFlowRate(differences) {
             if (differences.length > 0) {
-                const latest = differences[differences.length - 1];
+                const latest = differences[0];
                 const relativeTime = timeAgo(latest.datetime);
-                document.getElementById("latestFlowRate").textContent = `Latest Flow Rate: ${latest.flowRate.toFixed(0)} cumec at ${latest.datetime} (${relativeTime})`;
+                document.getElementById("latestFlowRate").textContent = `Latest Flow Rate: ${latest.flowRate.toFixed(0)} cumec ${relativeTime}`;
             }
         }
         window.onload = loadAndCompare;
