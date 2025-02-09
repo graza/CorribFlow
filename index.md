@@ -49,6 +49,8 @@ title: Water Level Difference
                     differences.push({ datetime, difference, flowRate });
                 }
             }
+            // Sort by datetime
+            differences.sort((a, b) => new Date(a.datetime) - new Date(b.datetime));
             return differences;
         }
 
@@ -97,7 +99,8 @@ title: Water Level Difference
         function updateLatestFlowRate(differences) {
             if (differences.length > 0) {
                 const latest = differences[differences.length - 1];
-                document.getElementById("latestFlowRate").textContent = `Latest Flow Rate: ${latest.flowRate.toFixed(0)} cumec`;
+                const relativeTime = timeAgo(latest.datetime);
+                document.getElementById("latestFlowRate").textContent = `Latest Flow Rate: ${latest.flowRate.toFixed(0)} cumec at ${latest.datetime} (${relativeTime})`;
             }
         }
         window.onload = loadAndCompare;
