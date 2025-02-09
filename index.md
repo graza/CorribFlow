@@ -92,10 +92,10 @@ title: Water Level Difference
 
         function displayResults(differences) {
             const table = document.getElementById("results");
-            table.innerHTML = "<tr><th>Datetime</th><th>Difference</th><th>Flow Rate (cumec)</th></tr>";
-            for (let row of differences.reverse()) {
-                table.innerHTML += `<tr><td>${row.datetime}</td><td>${row.difference.toFixed(2)}</td><td>${row.flowRate.toFixed(2)}</td></tr>`;
+            for (let row of differences) {
+                table.innerHTML = `<tr><td>${row.datetime}</td><td>${row.difference.toFixed(2)}</td><td>${row.flowRate.toFixed(2)}</td></tr>` + table.innerHTML;
             }
+            table.innerHTML = "<tr><th>Datetime</th><th>Difference</th><th>Flow Rate (cumec)</th></tr> + table.innerHTML";
         }
         function plotChart(differences) {
             const ctx = document.getElementById("chart").getContext("2d");
@@ -110,17 +110,9 @@ title: Water Level Difference
                     datasets: [
                         {
                             label: "Flow Rate (cumec)",
-                            data: data,
-                            borderColor: "blue",
-                            fill: false,
-                            tension: 0.4 // Smooth the curve
-                        },
-                        {
-                            label: "Smoothed Trend",
                             data: smoothedData,
-                            borderColor: "red",
-                            fill: false,
-                            borderDash: [5, 5]
+                            borderColor: "blue",
+                            fill: false
                         }
                     ]
                 },
