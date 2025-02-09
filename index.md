@@ -54,6 +54,19 @@ title: Water Level Difference
             return differences;
         }
 
+        function timeAgo(datetime) {
+            const now = new Date();
+            const past = new Date(datetime);
+            const diffMs = now - past;
+            const diffMinutes = Math.floor(diffMs / 60000);
+            if (diffMinutes < 1) return "just now";
+            if (diffMinutes < 60) return `${diffMinutes} minutes ago`;
+            const diffHours = Math.floor(diffMinutes / 60);
+            if (diffHours < 24) return `${diffHours} hours ago`;
+            const diffDays = Math.floor(diffHours / 24);
+            return `${diffDays} days ago`;
+        }
+
         async function loadAndCompare() {
             const data1 = await fetchCSV(url1);
             const data2 = await fetchCSV(url2);
