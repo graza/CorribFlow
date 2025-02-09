@@ -39,7 +39,6 @@ title: Water Level Difference
             }
             return data;
         }
-
         function computeDifferences(data1, data2) {
             const differences = [];
             for (let datetime in data1) {
@@ -50,10 +49,19 @@ title: Water Level Difference
                 }
             }
             // Sort by datetime
-            differences.sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
+            differences.sort((a, b) => new Date(a.datetime) - new Date(b.datetime));
             return differences;
         }
-
+        function movingAverage(data, windowSize) {
+            let result = [];
+            for (let i = 0; i < data.length; i++) {
+                let start = Math.max(0, i - windowSize + 1);
+                let subset = data.slice(start, i + 1);
+                let average = subset.reduce((sum, value) => sum + value, 0) / subset.length;
+                result.push(average);
+            }
+            return result;
+        }
         function formatTime(datetime) {
             const date = new Date(datetime);
             return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -85,26 +93,36 @@ title: Water Level Difference
         function displayResults(differences) {
             const table = document.getElementById("results");
             table.innerHTML = "<tr><th>Datetime</th><th>Difference</th><th>Flow Rate (cumec)</th></tr>";
-            for (let row of differences) {
+            for (let row of differences.reverse()) {
                 table.innerHTML += `<tr><td>${row.datetime}</td><td>${row.difference.toFixed(2)}</td><td>${row.flowRate.toFixed(2)}</td></tr>`;
             }
         }
         function plotChart(differences) {
             const ctx = document.getElementById("chart").getContext("2d");
-            const labels = differences.map(d => d.datetime).reverse();
-            const data = differences.map(d => d.flowRate).reverse();
-            
+            const labels = differences.map(d => d.datetime);
+            const data = differences.map(d => d.flowRate);
+            const smoothedData = movingAverage(data, 5);
+        
             new Chart(ctx, {
                 type: "line",
                 data: {
                     labels: labels,
-                    datasets: [{
-                        label: "Flow Rate (cumec)",
-                        data: data,
-                        borderColor: "blue",
-                        fill: false,
-                        tension: 0.4 // Smooth the curve
-                    }]
+                    datasets: [
+                        {
+                            label: "Flow Rate (cumec)",
+                            data: data,
+                            borderColor: "blue",
+                            fill: false,
+                            tension: 0.4 // Smooth the curve
+                        },
+                        {
+                            label: "Smoothed Trend",
+                            data: smoothedData,
+                            borderColor: "red",
+                            fill: false,
+                            borderDash: [5, 5]
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
@@ -120,7 +138,7 @@ title: Water Level Difference
         }
         function updateLatestFlowRate(differences) {
             if (differences.length > 0) {
-                const latest = differences[0];
+                const latest = differences[differences.length - 1];
                 const relativeTime = timeAgo(latest.datetime);
                 document.getElementById("latestFlowRate").textContent = `Latest Flow Rate: ${latest.flowRate.toFixed(0)} cumec ${relativeTime}`;
             }
