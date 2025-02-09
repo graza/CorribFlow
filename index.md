@@ -91,8 +91,8 @@ title: Water Level Difference
         }
         function plotChart(differences) {
             const ctx = document.getElementById("chart").getContext("2d");
-            const labels = differences.map(d => d.datetime);
-            const data = differences.map(d => d.flowRate);
+            const labels = differences.map(d => d.datetime).reverse();
+            const data = differences.map(d => d.flowRate).reverse();
             
             new Chart(ctx, {
                 type: "line",
@@ -102,7 +102,8 @@ title: Water Level Difference
                         label: "Flow Rate (cumec)",
                         data: data,
                         borderColor: "blue",
-                        fill: false
+                        fill: false,
+                        tension: 0.4 // Smooth the curve
                     }]
                 },
                 options: {
