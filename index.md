@@ -1,6 +1,5 @@
 ---
 layout: default
-title: Water Level Difference
 ---
 
 <html lang="en">
