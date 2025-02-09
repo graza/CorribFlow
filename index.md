@@ -91,10 +91,11 @@ title: Water Level Difference
         };
         function displayResults(differences) {
             const table = document.getElementById("results");
-            table.innerHTML = "<tr><th>Datetime</th><th>Difference</th><th>Flow Rate (cumec)</th></tr>";
+            table.innerHTML = "<tr><th>Datetime</th><th>Difference (m)</th><th>Flow Rate (cumec)</th></tr>";
             for (let i = differences.length - 1; i >= 0; i--) {
                 const row = differences[i];
-                table.innerHTML += `<tr><td>${row.datetime}</td><td>${row.difference.toFixed(2)}</td><td>${row.flowRate.toFixed(0)} cumec</td></tr>`;
+                const formattedDate = new Date(row.datetime).toLocaleString();
+                table.innerHTML += `<tr><td>${formattedDate}</td><td>${row.difference.toFixed(3)}m</td><td>${row.flowRate.toFixed(0)}cumec</td></tr>`;
             }
         }
         function plotChart(differences) {
