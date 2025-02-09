@@ -4,14 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Water Level Difference</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <h1>Water Level Difference Calculator</h1>
-    <label for="csvUrl1">CSV URL 1:</label>
-    <!-- input type="text" id="csvUrl1" placeholder="Enter first CSV URL"><br>
+    <!-- label for="csvUrl1">CSV URL 1:</label>
+    <input type="text" id="csvUrl1" placeholder="Enter first CSV URL"><br>
     <label for="csvUrl2">CSV URL 2:</label>
     <input type="text" id="csvUrl2" placeholder="Enter second CSV URL"><br -->
     <button id="compareButton">Compare</button>
+    <canvas id="chart"></canvas>
     <table id="results">
         <tr><th>Datetime</th><th>Difference</th><th>Flow Rate</th></tr>
     </table>
@@ -58,6 +60,7 @@
             
             const differences = computeDifferences(data1, data2);
             displayResults(differences);
+            plotChart(differences);
         });
 
         function displayResults(differences) {
@@ -66,6 +69,31 @@
             for (let row of differences) {
                 table.innerHTML += `<tr><td>${row.datetime}</td><td>${row.difference.toFixed(2)}</td><td>${row.flowRate.toFixed(2)}</td></tr>`;
             }
+        }
+        function plotChart(differences) {
+            const ctx = document.getElementById("chart").getContext("2d");
+            const labels = differences.map(d => d.datetime);
+            const data = differences.map(d => d.flowRate);
+            
+            new Chart(ctx, {
+                type: "line",
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: "Flow Rate",
+                        data: data,
+                        borderColor: "blue",
+                        fill: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: { title: { display: true, text: "Datetime" } },
+                        y: { title: { display: true, text: "Flow Rate" } }
+                    }
+                }
+            });
         }
     </script>
 </body>
