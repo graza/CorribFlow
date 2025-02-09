@@ -1,3 +1,8 @@
+---
+layout: default
+title: Water Level Difference
+---
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
