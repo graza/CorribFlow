@@ -45,6 +45,13 @@ layout: default
             const data = {};
             for (let row of rows) {
                 const [datetime, level] = row.split(",");
+                const dateObj = new Date(datetime);
+                const hours = dateObj.getHours();
+                const minutes = dateObj.getMinutes();
+                
+                if (timeRange === "week" && minutes !== 0) continue;
+                if (timeRange === "month" && ![0, 6, 12, 18].includes(hours)) continue;
+                
                 data[datetime] = parseFloat(level);
             }
             return data;
@@ -94,7 +101,7 @@ layout: default
             table.innerHTML = "<tr><th>Datetime</th><th>Difference (m)</th><th>Flow Rate (cumec)</th></tr>";
             for (let i = differences.length - 1; i >= 0; i--) {
                 const row = differences[i];
-                const formattedDate = new Date(row.datetime).toLocaleString();
+                const formattedDate = new Date(row.datetime).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
                 table.innerHTML += `<tr><td>${formattedDate}</td><td>${row.difference.toFixed(3)}m</td><td>${row.flowRate.toFixed(0)}cumec</td></tr>`;
             }
         }
