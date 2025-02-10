@@ -111,7 +111,7 @@ layout: default
             if (chartInstance) {
                 chartInstance.destroy();
             }
-            const labels = differences.map(d => d.datetime);
+            const labels = differences.map(d => new Date(d.datetime).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }));
             const data = differences.map(d => d.flowRate);
             const smoothedData = movingAverage(data, 5);
         
