@@ -23,6 +23,7 @@ layout: default
 
     <script>
         let timeRange = "day";
+        let chartInstance = null;
         
         function getUrls(range) {
             return [
@@ -99,11 +100,14 @@ layout: default
         }
         function plotChart(differences) {
             const ctx = document.getElementById("chart").getContext("2d");
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
             const labels = differences.map(d => d.datetime);
             const data = differences.map(d => d.flowRate);
             const smoothedData = movingAverage(data, 5);
         
-            new Chart(ctx, {
+            chartInstance = new Chart(ctx, {
                 type: "line",
                 data: {
                     labels: labels,
