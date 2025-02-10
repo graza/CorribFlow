@@ -51,6 +51,7 @@ layout: default
                 
                 if (timeRange === "week" && minutes !== 0) continue;
                 if (timeRange === "month" && ![0, 6, 12, 18].includes(hours)) continue;
+                if (timeRange === "month" && minutes !== 0) continue;
                 
                 data[datetime] = parseFloat(level);
             }
