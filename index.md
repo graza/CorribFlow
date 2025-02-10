@@ -102,7 +102,7 @@ layout: default
             table.innerHTML = "<tr><th>Datetime</th><th>Difference (m)</th><th>Flow Rate (cumec)</th></tr>";
             for (let i = differences.length - 1; i >= 0; i--) {
                 const row = differences[i];
-                const formattedDate = new Date(row.datetime).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+                const formattedDate = new Date(row.datetime).toLocaleString("en-GB", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
                 table.innerHTML += `<tr><td>${formattedDate}</td><td>${row.difference.toFixed(3)}m</td><td>${row.flowRate.toFixed(0)}cumec</td></tr>`;
             }
         }
@@ -111,7 +111,7 @@ layout: default
             if (chartInstance) {
                 chartInstance.destroy();
             }
-            const labels = differences.map(d => new Date(d.datetime).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }));
+            const labels = differences.map(d => new Date(d.datetime).toLocaleString("en-GB", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }));
             const data = differences.map(d => d.flowRate);
             const smoothedData = movingAverage(data, 5);
         
