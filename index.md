@@ -11,15 +11,25 @@ layout: default
 </head>
 <body>
     <h1>Corrib Flow Estimate</h1>
-    <h2 id="latestFlowRate">Latest Flow Rate: Loading...</h2>
+    <nav>
+        <a href="#" onclick="changeTimeRange('day')">Day</a> |
+        <a href="#" onclick="changeTimeRange('week')">Week</a> |
+        <a href="#" onclick="changeTimeRange('month')">Month</a>
+    </nav>    <h2 id="latestFlowRate">Latest Flow Rate: Loading...</h2>
     <canvas id="chart"></canvas>
     <table id="results">
         <tr><th>Datetime</th><th>Difference</th><th>Flow Rate (cumec)</th></tr>
     </table>
 
     <script>
-        const url1 = "https://waterlevel.ie/data/day/30089_OD.csv";
-        const url2 = "https://waterlevel.ie/data/day/30099_OD.csv";
+        let timeRange = "day";
+        
+        function getUrls(range) {
+            return [
+                `https://waterlevel.ie/data/${range}/30089_OD.csv`,
+                `https://waterlevel.ie/data/${range}/30099_OD.csv`
+            ];
+        }
 
         async function fetchCSV(url) {
             const proxy = "https://api.allorigins.win/raw?url=";
@@ -78,16 +88,6 @@ layout: default
             const diffDays = Math.floor(diffHours / 24);
             return `${diffDays} days ago`;
         }
-
-        async function loadAndCompare() {
-            const data1 = await fetchCSV(url1);
-            const data2 = await fetchCSV(url2);
-            
-            const differences = computeDifferences(data1, data2);
-            displayResults(differences);
-            plotChart(differences);
-            updateLatestFlowRate(differences);
-        };
         function displayResults(differences) {
             const table = document.getElementById("results");
             table.innerHTML = "<tr><th>Datetime</th><th>Difference (m)</th><th>Flow Rate (cumec)</th></tr>";
@@ -112,7 +112,8 @@ layout: default
                             label: "Flow Rate (cumec)",
                             data: smoothedData,
                             borderColor: "blue",
-                            fill: false
+                            fill: false,
+                            tension: 0.4
                         }
                     ]
                 },
@@ -134,6 +135,20 @@ layout: default
                 const relativeTime = timeAgo(latest.datetime);
                 document.getElementById("latestFlowRate").textContent = `Latest Flow Rate: ${latest.flowRate.toFixed(0)} cumec ${relativeTime}`;
             }
+        }
+        async function loadAndCompare() {
+            const [url1, url2] = getUrls(timeRange);
+            const data1 = await fetchCSV(url1);
+            const data2 = await fetchCSV(url2);
+            
+            const differences = computeDifferences(data1, data2);
+            updateLatestFlowRate(differences);
+            plotChart(differences);
+            displayResults(differences);
+        };
+        function changeTimeRange(range) {
+            timeRange = range;
+            loadAndCompare();
         }
         window.onload = loadAndCompare;
     </script>
