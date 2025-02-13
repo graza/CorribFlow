@@ -36,7 +36,8 @@ layout: default
             const allOriginsUrl = `https://api.allorigins.win/get?disableCache=true&url=${encodeURIComponent(url)}`;
             const response = await fetch(allOriginsUrl);
             const data = await response.json();
-            return parseCSV(data.contents);
+            const base64Part = data.contents.split(',')[1];
+            return parseCSV(atob(base64Part));
         }
 
         function parseCSV(text) {
