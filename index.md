@@ -33,11 +33,10 @@ layout: default
         }
 
         async function fetchCSV(url) {
-            const proxy = "https://api.allorigins.win/raw?url=";
-            const response = await fetch(proxy + encodeURIComponent(url));
-            const text = await response.text();
-            console.log(`fetched {url}`)
-            return parseCSV(text);
+            const allOriginsUrl = `https://api.allorigins.win/get?disableCache=true&url=${encodeURIComponent(url)}`;
+            const response = await fetch(allOriginsUrl);
+            const data = await response.json();
+            return parseCSV(data.contents);
         }
 
         function parseCSV(text) {
