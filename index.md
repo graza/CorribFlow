@@ -25,19 +25,18 @@ layout: default
         let timeRange = "day";
         let chartInstance = null;
         
+        const WORKER_URL = 'https://corrib-flow.graza.workers.dev';
+
         function getUrls(range) {
             return [
-                `https://waterlevel.ie/data/${range}/30089_OD.csv`,
-                `https://waterlevel.ie/data/${range}/30099_OD.csv`
+                `${WORKER_URL}/data/month/30089_OD.csv`,
+                `${WORKER_URL}/data/month/30099_OD.csv`
             ];
         }
 
         async function fetchCSV(url) {
-            const allOriginsUrl = `https://api.allorigins.win/get?disableCache=true&url=${encodeURIComponent(url)}`;
-            const response = await fetch(allOriginsUrl);
-            const data = await response.json();
-            const base64Part = data.contents.split(',')[1];
-            return parseCSV(atob(base64Part));
+            const response = await fetch(url);
+            return parseCSV(await response.text());
         }
 
         function parseCSV(text) {
