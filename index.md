@@ -41,6 +41,7 @@ layout: default
         }
 
         const RANGE_CUTOFF_MS = { day: 24 * 3600e3, week: 7 * 24 * 3600e3, month: 35 * 24 * 3600e3 };
+        const RANGE_INTERVAL_MS = { day: 0, week: 3600e3, month: 6 * 3600e3 };
 
         function parseUTC(datetime) {
             return new Date(datetime.replace(' ', 'T') + 'Z');
@@ -48,17 +49,18 @@ layout: default
 
         function parseCSV(text) {
             const rows = text.trim().split("\n").slice(1);
-            const data = {};
             const cutoff = Date.now() - RANGE_CUTOFF_MS[timeRange];
-            for (let row of rows) {
-                const [datetime, level] = row.split(",");
+            const intervalMs = RANGE_INTERVAL_MS[timeRange];
+            const data = {};
+            let lastKept = null;
+            for (let i = rows.length - 1; i >= 0; i--) {
+                const [datetime, level] = rows[i].split(",");
                 const dateObj = parseUTC(datetime);
-                if (dateObj < cutoff) continue;
-                const hours = dateObj.getUTCHours();
-                const minutes = dateObj.getUTCMinutes();
-                if (timeRange === "week" && minutes !== 0) continue;
-                if (timeRange === "month" && (minutes !== 0 || ![0, 6, 12, 18].includes(hours))) continue;
-                data[datetime] = parseFloat(level);
+                if (dateObj < cutoff) break;
+                if (lastKept === null || (lastKept - dateObj) >= intervalMs) {
+                    data[datetime] = parseFloat(level);
+                    lastKept = dateObj;
+                }
             }
             return data;
         }
