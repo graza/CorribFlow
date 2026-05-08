@@ -20,6 +20,7 @@ layout: default
     <table id="results">
         <tr><th>Datetime</th><th>Difference</th><th>Flow Rate (cumec)</th></tr>
     </table>
+    <p><small>Contains Irish Public Sector Information licensed under a <a href="https://creativecommons.org/licenses/by/4.0/">Creative Commons Attribution 4.0 International (CC BY 4.0)</a> licence. Source: <a href="https://waterlevel.ie">waterlevel.ie</a>, provided by the Office of Public Works.</small></p>
 
     <script>
         let timeRange = "day";
@@ -41,16 +42,20 @@ layout: default
 
         const RANGE_CUTOFF_MS = { day: 24 * 3600e3, week: 7 * 24 * 3600e3, month: 35 * 24 * 3600e3 };
 
+        function parseUTC(datetime) {
+            return new Date(datetime.replace(' ', 'T') + 'Z');
+        }
+
         function parseCSV(text) {
             const rows = text.trim().split("\n").slice(1);
             const data = {};
             const cutoff = Date.now() - RANGE_CUTOFF_MS[timeRange];
             for (let row of rows) {
                 const [datetime, level] = row.split(",");
-                const dateObj = new Date(datetime);
+                const dateObj = parseUTC(datetime);
                 if (dateObj < cutoff) continue;
-                const hours = dateObj.getHours();
-                const minutes = dateObj.getMinutes();
+                const hours = dateObj.getUTCHours();
+                const minutes = dateObj.getUTCMinutes();
                 if (timeRange === "week" && minutes !== 0) continue;
                 if (timeRange === "month" && (minutes !== 0 || ![0, 6, 12, 18].includes(hours))) continue;
                 data[datetime] = parseFloat(level);
@@ -66,8 +71,7 @@ layout: default
                     differences.push({ datetime, difference, flowRate });
                 }
             }
-            // Sort by datetime
-            differences.sort((a, b) => new Date(a.datetime) - new Date(b.datetime));
+            differences.sort((a, b) => parseUTC(a.datetime) - parseUTC(b.datetime));
             return differences;
         }
         function movingAverage(data, windowSize) {
@@ -81,18 +85,13 @@ layout: default
             return result;
         }
         function formatTime(datetime) {
-            const date = new Date(datetime);
-            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            return parseUTC(datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         }
         function timeAgo(datetime) {
-            const now = new Date();
-            const past = new Date(datetime);
-            const diffMs = now - past;
-            const diffMinutes = Math.floor(diffMs / 60000);
+            const diffMinutes = Math.floor((Date.now() - parseUTC(datetime)) / 60000);
             if (diffMinutes < 1) return "just now";
             if (diffMinutes < 60) return `${diffMinutes} minutes ago (${formatTime(datetime)})`;
             const diffHours = Math.floor(diffMinutes / 60);
-            return `${diffHours} hours ago (${formatTime(datetime)})`;
             if (diffHours < 24) return `${diffHours} hours ago (${formatTime(datetime)})`;
             const diffDays = Math.floor(diffHours / 24);
             return `${diffDays} days ago`;
@@ -102,7 +101,7 @@ layout: default
             table.innerHTML = "<tr><th>Datetime</th><th>Difference (m)</th><th>Flow Rate (cumec)</th></tr>";
             for (let i = differences.length - 1; i >= 0; i--) {
                 const row = differences[i];
-                const formattedDate = new Date(row.datetime).toLocaleString("en-GB", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+                const formattedDate = parseUTC(row.datetime).toLocaleString("en-GB", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
                 table.innerHTML += `<tr><td>${formattedDate}</td><td>${row.difference.toFixed(3)}m</td><td>${row.flowRate.toFixed(0)}cumec</td></tr>`;
             }
         }
@@ -111,7 +110,7 @@ layout: default
             if (chartInstance) {
                 chartInstance.destroy();
             }
-            const labels = differences.map(d => new Date(d.datetime).toLocaleString("en-GB", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }));
+            const labels = differences.map(d => parseUTC(d.datetime).toLocaleString("en-GB", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }));
             const data = differences.map(d => d.flowRate);
             const smoothedData = movingAverage(data, 5);
         
