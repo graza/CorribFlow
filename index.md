@@ -39,19 +39,20 @@ layout: default
             return parseCSV(await response.text());
         }
 
+        const RANGE_CUTOFF_MS = { day: 24 * 3600e3, week: 7 * 24 * 3600e3, month: 35 * 24 * 3600e3 };
+
         function parseCSV(text) {
             const rows = text.trim().split("\n").slice(1);
             const data = {};
+            const cutoff = Date.now() - RANGE_CUTOFF_MS[timeRange];
             for (let row of rows) {
                 const [datetime, level] = row.split(",");
                 const dateObj = new Date(datetime);
+                if (dateObj < cutoff) continue;
                 const hours = dateObj.getHours();
                 const minutes = dateObj.getMinutes();
-                
                 if (timeRange === "week" && minutes !== 0) continue;
-                if (timeRange === "month" && ![0, 6, 12, 18].includes(hours)) continue;
-                if (timeRange === "month" && minutes !== 0) continue;
-                
+                if (timeRange === "month" && (minutes !== 0 || ![0, 6, 12, 18].includes(hours))) continue;
                 data[datetime] = parseFloat(level);
             }
             return data;
