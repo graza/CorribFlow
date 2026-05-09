@@ -23,9 +23,9 @@ layout: default
         <a href="#" onclick="changeTimeRange('month')">Month</a>
     </nav>
     <div id="period-nav">
-        <button id="prev-period" onclick="shiftPeriod(1)">&#8592;</button>
+        <button id="prev-period" onclick="shiftPeriod(-1)">&#8592;</button>
         <span id="period-label"></span>
-        <button id="next-period" onclick="shiftPeriod(-1)" disabled>&#8594;</button>
+        <button id="next-period" onclick="shiftPeriod(1)" disabled>&#8594;</button>
     </div>
     <h2 id="latestFlowRate">Latest Flow Rate: Loading...</h2>
     <canvas id="chart"></canvas>
@@ -35,8 +35,8 @@ layout: default
     <p><small>Contains Irish Public Sector Information licensed under a <a href="https://creativecommons.org/licenses/by/4.0/">Creative Commons Attribution 4.0 International (CC BY 4.0)</a> licence. Source: <a href="https://waterlevel.ie">waterlevel.ie</a>, provided by the Office of Public Works.</small></p>
 
     <script>
-        let timeRange = "day";
-        let offset = 0; // 0 = current period, 1 = one period back, etc.
+        let timeRange = 'day';
+        let periodStart = null; // null = current period; Date = specific past period start (UTC midnight)
         let chartInstance = null;
 
         const WORKER_URL = 'https://corrib-flow.graza.workers.dev';
@@ -46,39 +46,85 @@ layout: default
             return new Date(datetime.replace(' ', 'T') + 'Z');
         }
 
-        function getPeriodBounds() {
+        // Returns the UTC midnight Date of the start of the current period
+        function currentPeriodStart() {
             const now = new Date();
             const todayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-
             if (timeRange === 'day') {
-                const start = todayUTC - offset * 86400000;
-                const end = offset === 0 ? now.getTime() : start + 86400000;
-                return { start, end };
+                return new Date(todayUTC);
             } else if (timeRange === 'week') {
                 const dow = now.getUTCDay();
-                const monday = todayUTC - (dow === 0 ? 6 : dow - 1) * 86400000;
-                const start = monday - offset * 7 * 86400000;
-                const end = offset === 0 ? now.getTime() : start + 7 * 86400000;
-                return { start, end };
+                return new Date(todayUTC - (dow === 0 ? 6 : dow - 1) * 86400000);
             } else {
-                const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset, 1);
-                const end = offset === 0 ? now.getTime() : Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset + 1, 1);
-                return { start, end };
+                return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+            }
+        }
+
+        function getPeriodBounds() {
+            const ps = periodStart || currentPeriodStart();
+            const now = new Date();
+            const isCurrent = !periodStart;
+
+            if (timeRange === 'day') {
+                return { start: ps.getTime(), end: isCurrent ? now.getTime() : ps.getTime() + 86400000 };
+            } else if (timeRange === 'week') {
+                return { start: ps.getTime(), end: isCurrent ? now.getTime() : ps.getTime() + 7 * 86400000 };
+            } else {
+                const endUTC = Date.UTC(ps.getUTCFullYear(), ps.getUTCMonth() + 1, 1);
+                return { start: ps.getTime(), end: isCurrent ? now.getTime() : endUTC };
             }
         }
 
         function getPeriodLabel() {
-            const { start } = getPeriodBounds();
-            const d = new Date(start);
+            const ps = periodStart || currentPeriodStart();
+            const isCurrent = !periodStart;
             if (timeRange === 'day') {
-                if (offset === 0) return 'Today';
-                return d.toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+                if (isCurrent) return 'Today';
+                return ps.toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
             } else if (timeRange === 'week') {
-                if (offset === 0) return 'This week';
-                return 'w/c ' + d.toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+                if (isCurrent) return 'This week';
+                return 'w/c ' + ps.toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
             } else {
-                if (offset === 0) return 'This month';
-                return d.toLocaleDateString('en-IE', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+                if (isCurrent) return 'This month';
+                return ps.toLocaleDateString('en-IE', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+            }
+        }
+
+        // Returns the URL date param string for the current periodStart, or null if current period
+        function getDateParam() {
+            if (!periodStart) return null;
+            const y = periodStart.getUTCFullYear();
+            const m = String(periodStart.getUTCMonth() + 1).padStart(2, '0');
+            if (timeRange === 'month') return `${y}-${m}`;
+            const d = String(periodStart.getUTCDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+
+        function updateURL() {
+            const params = new URLSearchParams({ view: timeRange });
+            const date = getDateParam();
+            if (date) params.set('date', date);
+            history.pushState({ timeRange, periodStartMs: periodStart?.getTime() ?? null }, '', `?${params}`);
+        }
+
+        function applyState(state) {
+            timeRange = state.timeRange;
+            periodStart = state.periodStartMs != null ? new Date(state.periodStartMs) : null;
+        }
+
+        function applyURLParams() {
+            const params = new URLSearchParams(location.search);
+            timeRange = params.get('view') || 'day';
+            const date = params.get('date');
+            if (date) {
+                const parts = date.split('-').map(Number);
+                periodStart = timeRange === 'month'
+                    ? new Date(Date.UTC(parts[0], parts[1] - 1, 1))
+                    : new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+                // Treat as current if it matches the actual current period start
+                if (periodStart >= currentPeriodStart()) periodStart = null;
+            } else {
+                periodStart = null;
             }
         }
 
@@ -117,10 +163,8 @@ layout: default
         function movingAverage(data, windowSize) {
             let result = [];
             for (let i = 0; i < data.length; i++) {
-                let start = Math.max(0, i - windowSize + 1);
-                let subset = data.slice(start, i + 1);
-                let average = subset.reduce((sum, value) => sum + value, 0) / subset.length;
-                result.push(average);
+                const subset = data.slice(Math.max(0, i - windowSize + 1), i + 1);
+                result.push(subset.reduce((s, v) => s + v, 0) / subset.length);
             }
             return result;
         }
@@ -131,65 +175,58 @@ layout: default
 
         function timeAgo(datetime) {
             const diffMinutes = Math.floor((Date.now() - parseUTC(datetime)) / 60000);
-            if (diffMinutes < 1) return "just now";
+            if (diffMinutes < 1) return 'just now';
             if (diffMinutes < 60) return `${diffMinutes} minutes ago (${formatTime(datetime)})`;
             const diffHours = Math.floor(diffMinutes / 60);
             if (diffHours < 24) return `${diffHours} hours ago (${formatTime(datetime)})`;
-            const diffDays = Math.floor(diffHours / 24);
-            return `${diffDays} days ago`;
+            return `${Math.floor(diffHours / 24)} days ago`;
         }
 
         function updateLatestFlowRate(differences) {
-            const el = document.getElementById("latestFlowRate");
+            const el = document.getElementById('latestFlowRate');
             if (differences.length === 0) {
                 el.textContent = 'No data available for this period';
                 return;
             }
             const latest = differences[differences.length - 1];
-            if (offset === 0) {
+            if (!periodStart) {
                 el.textContent = `Latest Flow Rate: ${latest.flowRate.toFixed(0)} cumec ${timeAgo(latest.datetime)}`;
             } else {
-                const formattedDate = parseUTC(latest.datetime).toLocaleString("en-GB", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+                const formattedDate = parseUTC(latest.datetime).toLocaleString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
                 el.textContent = `Last reading: ${latest.flowRate.toFixed(0)} cumec at ${formattedDate}`;
             }
         }
 
         function displayResults(differences) {
-            const table = document.getElementById("results");
-            table.innerHTML = "<tr><th>Datetime</th><th>Difference (m)</th><th>Flow Rate (cumec)</th></tr>";
+            const table = document.getElementById('results');
+            table.innerHTML = '<tr><th>Datetime</th><th>Difference (m)</th><th>Flow Rate (cumec)</th></tr>';
             for (let i = differences.length - 1; i >= 0; i--) {
                 const row = differences[i];
-                const formattedDate = parseUTC(row.datetime).toLocaleString("en-GB", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+                const formattedDate = parseUTC(row.datetime).toLocaleString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
                 table.innerHTML += `<tr><td>${formattedDate}</td><td>${row.difference.toFixed(3)}m</td><td>${row.flowRate.toFixed(0)}cumec</td></tr>`;
             }
         }
 
         function plotChart(differences) {
-            const ctx = document.getElementById("chart").getContext("2d");
+            const ctx = document.getElementById('chart').getContext('2d');
             if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
             if (differences.length === 0) return;
 
-            const labels = differences.map(d => parseUTC(d.datetime).toLocaleString("en-GB", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }));
+            const labels = differences.map(d => parseUTC(d.datetime).toLocaleString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }));
             const smoothedData = movingAverage(differences.map(d => d.flowRate), 5);
 
             chartInstance = new Chart(ctx, {
-                type: "line",
+                type: 'line',
                 data: {
                     labels,
-                    datasets: [{
-                        label: "Flow Rate (cumec)",
-                        data: smoothedData,
-                        borderColor: "blue",
-                        fill: false,
-                        tension: 0.4
-                    }]
+                    datasets: [{ label: 'Flow Rate (cumec)', data: smoothedData, borderColor: 'blue', fill: false, tension: 0.4 }]
                 },
                 options: {
                     responsive: true,
                     plugins: { legend: { display: false } },
                     scales: {
-                        x: { title: { display: true, text: "Datetime" } },
-                        y: { title: { display: true, text: "Flow Rate (cumec)" } }
+                        x: { title: { display: true, text: 'Datetime' } },
+                        y: { title: { display: true, text: 'Flow Rate (cumec)' } }
                     }
                 }
             });
@@ -197,39 +234,61 @@ layout: default
 
         function updateNav() {
             document.getElementById('period-label').textContent = getPeriodLabel();
-            document.getElementById('next-period').disabled = offset === 0;
+            document.getElementById('next-period').disabled = !periodStart;
         }
 
         function shiftPeriod(dir) {
-            offset = Math.max(0, offset + dir);
+            const ps = periodStart || currentPeriodStart();
+            let newStart;
+            if (timeRange === 'day') {
+                newStart = new Date(ps.getTime() + dir * 86400000);
+            } else if (timeRange === 'week') {
+                newStart = new Date(ps.getTime() + dir * 7 * 86400000);
+            } else {
+                newStart = new Date(Date.UTC(ps.getUTCFullYear(), ps.getUTCMonth() + dir, 1));
+            }
+            periodStart = newStart >= currentPeriodStart() ? null : newStart;
+            updateURL();
+            updateNav();
+            loadAndCompare();
+        }
+
+        function changeTimeRange(range) {
+            timeRange = range;
+            periodStart = null;
+            updateURL();
             updateNav();
             loadAndCompare();
         }
 
         async function fetchCSV(url) {
-            const response = await fetch(url);
-            return parseCSV(await response.text());
+            return parseCSV(await (await fetch(url)).text());
         }
 
         async function loadAndCompare() {
-            const url = `${WORKER_URL}/data/month/30089_OD.csv`;
-            const url2 = `${WORKER_URL}/data/month/30099_OD.csv`;
-            const [data1, data2] = await Promise.all([fetchCSV(url), fetchCSV(url2)]);
+            const [data1, data2] = await Promise.all([
+                fetchCSV(`${WORKER_URL}/data/month/30089_OD.csv`),
+                fetchCSV(`${WORKER_URL}/data/month/30099_OD.csv`),
+            ]);
             const differences = computeDifferences(data1, data2);
             updateLatestFlowRate(differences);
             plotChart(differences);
             displayResults(differences);
         }
 
-        function changeTimeRange(range) {
-            timeRange = range;
-            offset = 0;
+        window.addEventListener('popstate', e => {
+            if (e.state) applyState(e.state);
+            else applyURLParams();
             updateNav();
             loadAndCompare();
-        }
+        });
 
+        applyURLParams();
         updateNav();
-        window.onload = loadAndCompare;
+        window.onload = () => {
+            history.replaceState({ timeRange, periodStartMs: periodStart?.getTime() ?? null }, '', location.href);
+            loadAndCompare();
+        };
     </script>
 </body>
 </html>
