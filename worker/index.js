@@ -40,12 +40,22 @@ async function fetchLatestFlow() {
   return { datetime, flowRate, pastFlow };
 }
 
-async function sendTelegram(env, message) {
+async function sendTelegramTo(env, chatId, message) {
   await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: message }),
+    body: JSON.stringify({ chat_id: chatId, text: message }),
   });
+}
+
+async function getSubscribers(env) {
+  const raw = await env.FLOW_KV.get('subscribers');
+  return raw ? JSON.parse(raw) : [];
+}
+
+async function broadcast(env, message) {
+  const subscribers = await getSubscribers(env);
+  await Promise.all(subscribers.map(chatId => sendTelegramTo(env, chatId, message)));
 }
 
 function flowSummary(flowRate, pastFlow, datetime) {
@@ -67,11 +77,27 @@ export default {
         return new Response('Forbidden', { status: 403 });
       }
       const update = await request.json();
-      const text = update.message?.text ?? '';
-      if (text.startsWith('/flow')) {
+      const message = update.message;
+      const chatId = message?.chat?.id;
+      const text = message?.text ?? '';
+
+      if (text.startsWith('/start')) {
+        const subscribers = await getSubscribers(env);
+        if (!subscribers.includes(chatId)) {
+          subscribers.push(chatId);
+          await env.FLOW_KV.put('subscribers', JSON.stringify(subscribers));
+        }
+        await sendTelegramTo(env, chatId, '✅ Subscribed to Corrib flow alerts.\nSend /stop to unsubscribe.');
+      } else if (text.startsWith('/stop')) {
+        const subscribers = await getSubscribers(env);
+        const updated = subscribers.filter(id => id !== chatId);
+        await env.FLOW_KV.put('subscribers', JSON.stringify(updated));
+        await sendTelegramTo(env, chatId, '🔕 Unsubscribed from Corrib flow alerts.');
+      } else if (text.startsWith('/flow')) {
         const { datetime, flowRate, pastFlow } = await fetchLatestFlow();
-        await sendTelegram(env, flowSummary(flowRate, pastFlow, datetime));
+        await sendTelegramTo(env, chatId, flowSummary(flowRate, pastFlow, datetime));
       }
+
       return new Response('OK');
     }
 
@@ -132,7 +158,7 @@ export default {
         new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Dublin', hour: 'numeric', hour12: false }).format(new Date())
       );
       if (dublinHour === 5 || dublinHour === 15) {
-        await sendTelegram(env, flowSummary(flowRate, pastFlow, datetime));
+        await broadcast(env, flowSummary(flowRate, pastFlow, datetime));
       }
       return;
     }
@@ -166,7 +192,7 @@ export default {
     await env.FLOW_KV.put('alertState', JSON.stringify([...crossed]));
 
     for (const alert of alerts) {
-      await sendTelegram(env, alert);
+      await broadcast(env, alert);
     }
   },
 };
