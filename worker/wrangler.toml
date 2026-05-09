@@ -3,7 +3,7 @@ main = "index.js"
 compatibility_date = "2025-01-01"
 
 [triggers]
-crons = ["*/15 * * * *"]
+crons = ["*/15 * * * *", "0 4,5,14,15 * * *"]
 
 [[kv_namespaces]]
 binding = "FLOW_KV"

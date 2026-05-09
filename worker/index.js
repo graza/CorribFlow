@@ -24,15 +24,20 @@ async function fetchLatestFlow() {
   ]);
   const [t1, t2] = await Promise.all([r1.text(), r2.text()]);
 
-  const lastRow1 = t1.trim().split('\n').pop().split(',');
-  const lastRow2 = t2.trim().split('\n').pop().split(',');
+  const rows1 = t1.trim().split('\n');
+  const rows2 = t2.trim().split('\n');
+
+  const lastRow1 = rows1[rows1.length - 1].split(',');
+  const lastRow2 = rows2[rows2.length - 1].split(',');
 
   const datetime = lastRow1[0];
-  const level1 = parseFloat(lastRow1[1]);
-  const level2 = parseFloat(lastRow2[1]);
-  const flowRate = 254.65 * (level1 - level2) + 28.883;
+  const flowRate = 254.65 * (parseFloat(lastRow1[1]) - parseFloat(lastRow2[1])) + 28.883;
 
-  return { datetime, flowRate };
+  // ~10 hours ago (40 readings back at 15-min intervals); index 1 skips header
+  const oldIdx = Math.max(1, rows1.length - 41);
+  const pastFlow = 254.65 * (parseFloat(rows1[oldIdx].split(',')[1]) - parseFloat(rows2[oldIdx].split(',')[1])) + 28.883;
+
+  return { datetime, flowRate, pastFlow };
 }
 
 async function sendTelegram(env, message) {
@@ -43,8 +48,33 @@ async function sendTelegram(env, message) {
   });
 }
 
+function flowSummary(flowRate, pastFlow, datetime) {
+  const trend = flowRate > pastFlow + 3 ? ' 📈' : flowRate < pastFlow - 3 ? ' 📉' : '';
+  const nextThreshold = THRESHOLDS.find(t => t > flowRate);
+  const status = nextThreshold
+    ? `${flowRate.toFixed(0)} cumec${trend} — next alert at ${nextThreshold} cumec`
+    : `${flowRate.toFixed(0)} cumec${trend} — above all alert thresholds`;
+  return `🌊 Corrib flow\n${status}\n${datetime} UTC`;
+}
+
 export default {
   async fetch(request, env, ctx) {
+    const { pathname } = new URL(request.url);
+
+    if (pathname === '/telegram' && request.method === 'POST') {
+      const secret = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response('Forbidden', { status: 403 });
+      }
+      const update = await request.json();
+      const text = update.message?.text ?? '';
+      if (text.startsWith('/flow')) {
+        const { datetime, flowRate, pastFlow } = await fetchLatestFlow();
+        await sendTelegram(env, flowSummary(flowRate, pastFlow, datetime));
+      }
+      return new Response('OK');
+    }
+
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: CORS_HEADERS });
     }
@@ -52,8 +82,6 @@ export default {
     if (request.method !== 'GET') {
       return new Response('Method not allowed', { status: 405 });
     }
-
-    const { pathname } = new URL(request.url);
 
     if (!VALID_PATH.test(pathname)) {
       return new Response('Not found', { status: 404 });
@@ -96,7 +124,18 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    const { datetime, flowRate } = await fetchLatestFlow();
+    const { datetime, flowRate, pastFlow } = await fetchLatestFlow();
+
+    // Twice-daily summary at 5am and 3pm Dublin time (DST-aware)
+    if (event.cron === '0 4,5,14,15 * * *') {
+      const dublinHour = parseInt(
+        new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Dublin', hour: 'numeric', hour12: false }).format(new Date())
+      );
+      if (dublinHour === 5 || dublinHour === 15) {
+        await sendTelegram(env, flowSummary(flowRate, pastFlow, datetime));
+      }
+      return;
+    }
 
     // crossedThresholds is the set of thresholds the flow is currently above
     const stateStr = await env.FLOW_KV.get('alertState');
