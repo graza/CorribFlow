@@ -48,9 +48,16 @@ async function sendTelegramTo(env, chatId, message) {
   });
 }
 
+const SUBSCRIBER_LIMIT = 100;
+
 async function getSubscribers(env) {
   const raw = await env.FLOW_KV.get('subscribers');
   return raw ? JSON.parse(raw) : [];
+}
+
+async function getCachedFlow(env) {
+  const raw = await env.FLOW_KV.get('latestFlow');
+  return raw ? JSON.parse(raw) : null;
 }
 
 async function broadcast(env, message) {
@@ -84,18 +91,24 @@ export default {
       if (text.startsWith('/start')) {
         const subscribers = await getSubscribers(env);
         if (!subscribers.includes(chatId)) {
-          subscribers.push(chatId);
-          await env.FLOW_KV.put('subscribers', JSON.stringify(subscribers));
+          if (subscribers.length >= SUBSCRIBER_LIMIT) {
+            await sendTelegramTo(env, chatId, '🔒 Subscriber limit reached.');
+          } else {
+            subscribers.push(chatId);
+            await env.FLOW_KV.put('subscribers', JSON.stringify(subscribers));
+            await sendTelegramTo(env, chatId, '✅ Subscribed to Corrib flow alerts.\nSend /stop to unsubscribe.');
+          }
+        } else {
+          await sendTelegramTo(env, chatId, '✅ Already subscribed.\nSend /stop to unsubscribe.');
         }
-        await sendTelegramTo(env, chatId, '✅ Subscribed to Corrib flow alerts.\nSend /stop to unsubscribe.');
       } else if (text.startsWith('/stop')) {
         const subscribers = await getSubscribers(env);
         const updated = subscribers.filter(id => id !== chatId);
         await env.FLOW_KV.put('subscribers', JSON.stringify(updated));
         await sendTelegramTo(env, chatId, '🔕 Unsubscribed from Corrib flow alerts.');
       } else if (text.startsWith('/flow')) {
-        const { datetime, flowRate, pastFlow } = await fetchLatestFlow();
-        await sendTelegramTo(env, chatId, flowSummary(flowRate, pastFlow, datetime));
+        const flow = await getCachedFlow(env) || await fetchLatestFlow();
+        await sendTelegramTo(env, chatId, flowSummary(flow.flowRate, flow.pastFlow, flow.datetime));
       }
 
       return new Response('OK');
@@ -151,6 +164,7 @@ export default {
 
   async scheduled(event, env, ctx) {
     const { datetime, flowRate, pastFlow } = await fetchLatestFlow();
+    await env.FLOW_KV.put('latestFlow', JSON.stringify({ datetime, flowRate, pastFlow }), { expirationTtl: 900 });
 
     // Twice-daily summary at 5am and 3pm Dublin time (DST-aware)
     if (event.cron === '0 4,5,14,15 * * *') {
