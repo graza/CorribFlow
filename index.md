@@ -62,17 +62,12 @@ layout: default
 
         function getPeriodBounds() {
             const ps = periodStart || currentPeriodStart();
-            const now = new Date();
-            const isCurrent = !periodStart;
-
-            if (timeRange === 'day') {
-                return { start: ps.getTime(), end: isCurrent ? now.getTime() : ps.getTime() + 86400000 };
-            } else if (timeRange === 'week') {
-                return { start: ps.getTime(), end: isCurrent ? now.getTime() : ps.getTime() + 7 * 86400000 };
-            } else {
-                const endUTC = Date.UTC(ps.getUTCFullYear(), ps.getUTCMonth() + 1, 1);
-                return { start: ps.getTime(), end: isCurrent ? now.getTime() : endUTC };
-            }
+            return {
+                start: ps.getTime(),
+                end: timeRange === 'day'  ? ps.getTime() + 86400000 :
+                     timeRange === 'week' ? ps.getTime() + 7 * 86400000 :
+                     Date.UTC(ps.getUTCFullYear(), ps.getUTCMonth() + 1, 1),
+            };
         }
 
         function getPeriodLabel() {
@@ -212,20 +207,32 @@ layout: default
             if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
             if (differences.length === 0) return;
 
-            const labels = differences.map(d => parseUTC(d.datetime).toLocaleString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }));
+            const fmt = d => d.toLocaleString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+            const labels = differences.map(d => fmt(parseUTC(d.datetime)));
             const smoothedData = movingAverage(differences.map(d => d.flowRate), 5);
+
+            // Pad current period to period end with nulls so the x-axis always spans the full period
+            if (!periodStart) {
+                const { end } = getPeriodBounds();
+                const intervalMs = RANGE_INTERVAL_MS[timeRange] || 15 * 60 * 1000;
+                const lastTime = parseUTC(differences[differences.length - 1].datetime).getTime();
+                for (let t = lastTime + intervalMs; t < end; t += intervalMs) {
+                    labels.push(fmt(new Date(t)));
+                    smoothedData.push(null);
+                }
+            }
 
             chartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels,
-                    datasets: [{ label: 'Flow Rate (cumec)', data: smoothedData, borderColor: 'blue', fill: false, tension: 0.4 }]
+                    datasets: [{ label: 'Flow Rate (cumec)', data: smoothedData, borderColor: 'blue', fill: false, tension: 0.4, spanGaps: false }]
                 },
                 options: {
                     responsive: true,
                     plugins: { legend: { display: false } },
                     scales: {
-                        x: { title: { display: true, text: 'Datetime' } },
+                        x: { title: { display: true, text: 'Datetime' }, ticks: { maxTicksLimit: 12 } },
                         y: { title: { display: true, text: 'Flow Rate (cumec)' } }
                     }
                 }
