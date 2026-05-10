@@ -2,6 +2,24 @@
 
 https://graza.github.io/CorribFlow/
 
+Flow estimate for the River Corrib in Galway, updated every 15 minutes. Includes a Telegram bot ([@corribflow_bot](https://t.me/corribflow_bot)) for threshold alerts and daily summaries.
+
+## Architecture
+
+```
+GitHub Pages (index.md)
+    └── fetches CSV via Cloudflare Worker (corrib-flow.graza.workers.dev)
+            └── proxies waterlevel.ie with CORS headers and 15-minute edge cache
+            └── cron every 15 min → checks flow thresholds → Telegram alerts
+            └── cron at 5am and 3pm Irish time → Telegram summary + QuickChart image
+            └── webhook → handles /start /stop /flow /chart bot commands
+```
+
+**Cloudflare services used:** Workers (free tier), KV (state storage), Cron Triggers.  
+See [`worker/README.md`](worker/README.md) for deployment instructions.
+
+---
+
 This website uses publically available data from the Office of Public Works (OPW) in Ireland to provide an estimate of the current flow rate on the Corrib River in Galway. 
 
 The OPW provides an API to fetch information about flow rates and water levels at various sites around Ireland.  Some of this sensor data is updated every 15 minutes.  Note however the data available for flow rate on the Corrib is only updated very infrequently, in the order of months.  The data that is available every 15 minutes is water level, including values relative to a datum point at Malin Head.  By correlating the available flow rate information with the difference in water level between two points, a model for the relationship between flow rate and water level difference can be created.

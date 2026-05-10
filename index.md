@@ -32,6 +32,17 @@ layout: default
     <table id="results">
         <tr><th>Datetime</th><th>Difference</th><th>Flow Rate (cumec)</th></tr>
     </table>
+    <details>
+        <summary>Telegram alerts</summary>
+        <p>Flow alerts and twice-daily summaries (5am and 3pm Irish time) are available via <a href="https://t.me/corribflow_bot">@corribflow_bot</a>. The bot can be added to a group chat — all members will see alerts and anyone can use the commands.</p>
+        <table>
+            <tr><td><code>/start</code></td><td>Subscribe to alerts and summaries</td></tr>
+            <tr><td><code>/stop</code></td><td>Unsubscribe</td></tr>
+            <tr><td><code>/flow</code></td><td>Current flow reading</td></tr>
+            <tr><td><code>/chart</code></td><td>12-hour flow chart</td></tr>
+        </table>
+        <p>Threshold alerts fire when flow crosses 100, 150, 200 … 500 cumec boundaries, with a 10 cumec hysteresis on the way down.</p>
+    </details>
     <p><small>Contains Irish Public Sector Information licensed under a <a href="https://creativecommons.org/licenses/by/4.0/">Creative Commons Attribution 4.0 International (CC BY 4.0)</a> licence. Source: <a href="https://waterlevel.ie">waterlevel.ie</a>, provided by the Office of Public Works.</small></p>
 
     <script>
