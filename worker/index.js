@@ -37,7 +37,15 @@ async function fetchLatestFlow() {
   const oldIdx = Math.max(1, rows1.length - 41);
   const pastFlow = 254.65 * (parseFloat(rows1[oldIdx].split(',')[1]) - parseFloat(rows2[oldIdx].split(',')[1])) + 28.883;
 
-  return { datetime, flowRate, pastFlow };
+  // Last 12 hours of readings (48 x 15-min intervals) for chart
+  const seriesStart = Math.max(1, rows1.length - 48);
+  const series = [];
+  for (let i = seriesStart; i < rows1.length; i++) {
+    const f = 254.65 * (parseFloat(rows1[i].split(',')[1]) - parseFloat(rows2[i].split(',')[1])) + 28.883;
+    series.push({ label: rows1[i].split(',')[0].slice(11, 16), flow: Math.round(f) });
+  }
+
+  return { datetime, flowRate, pastFlow, series };
 }
 
 async function sendTelegramTo(env, chatId, message) {
@@ -65,13 +73,62 @@ async function broadcast(env, message) {
   await Promise.all(subscribers.map(chatId => sendTelegramTo(env, chatId, message)));
 }
 
+async function broadcastPhoto(env, caption, chartConfig) {
+  const subscribers = await getSubscribers(env);
+  if (subscribers.length === 0) return;
+
+  // Fetch chart image once, then send to all subscribers
+  const qcRes = await fetch('https://quickchart.io/chart', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chart: chartConfig, width: 500, height: 280, format: 'png', backgroundColor: 'white' }),
+  });
+  const imageData = await qcRes.arrayBuffer();
+
+  await Promise.all(subscribers.map(chatId => {
+    const form = new FormData();
+    form.append('chat_id', String(chatId));
+    form.append('photo', new Blob([imageData], { type: 'image/png' }), 'flow.png');
+    form.append('caption', caption);
+    return fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendPhoto`, {
+      method: 'POST',
+      body: form,
+    });
+  }));
+}
+
 function flowSummary(flowRate, pastFlow, datetime) {
-  const trend = flowRate > pastFlow + 3 ? ' 📈' : flowRate < pastFlow - 3 ? ' 📉' : '';
+  const change = Math.round(flowRate - pastFlow);
+  const trend = change > 3 ? '📈' : change < -3 ? '📉' : '➡️';
+  const changeStr = change >= 0 ? `+${change}` : `−${Math.abs(change)}`;
   const nextThreshold = THRESHOLDS.find(t => t > flowRate);
-  const status = nextThreshold
-    ? `${flowRate.toFixed(0)} cumec${trend} — next alert at ${nextThreshold} cumec`
-    : `${flowRate.toFixed(0)} cumec${trend} — above all alert thresholds`;
-  return `🌊 Corrib flow\n${status}\n${datetime} UTC`;
+  const thresholdLine = nextThreshold ? `Next alert: ${nextThreshold} cumec` : `Above all thresholds`;
+  return `🌊 Corrib flow\n${flowRate.toFixed(0)} cumec ${trend} (${changeStr} over 10h)\n${thresholdLine}\n${datetime} UTC`;
+}
+
+function buildChartConfig(series) {
+  return {
+    type: 'line',
+    data: {
+      labels: series.map(p => p.label),
+      datasets: [{
+        data: series.map(p => p.flow),
+        borderColor: 'rgb(54, 162, 235)',
+        backgroundColor: 'rgba(54, 162, 235, 0.1)',
+        fill: true,
+        pointRadius: 0,
+        borderWidth: 2,
+        lineTension: 0.3,
+      }],
+    },
+    options: {
+      legend: { display: false },
+      scales: {
+        xAxes: [{ ticks: { maxTicksLimit: 7, fontSize: 11 } }],
+        yAxes: [{ ticks: { beginAtZero: false }, scaleLabel: { display: true, labelString: 'cumec' } }],
+      },
+    },
+  };
 }
 
 export default {
@@ -163,7 +220,7 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    const { datetime, flowRate, pastFlow } = await fetchLatestFlow();
+    const { datetime, flowRate, pastFlow, series } = await fetchLatestFlow();
     await env.FLOW_KV.put('latestFlow', JSON.stringify({ datetime, flowRate, pastFlow }), { expirationTtl: 900 });
 
     // Twice-daily summary at 5am and 3pm Dublin time (DST-aware)
@@ -172,7 +229,7 @@ export default {
         new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Dublin', hour: 'numeric', hour12: false }).format(new Date())
       );
       if (dublinHour === 5 || dublinHour === 15) {
-        await broadcast(env, flowSummary(flowRate, pastFlow, datetime));
+        await broadcastPhoto(env, flowSummary(flowRate, pastFlow, datetime), buildChartConfig(series));
       }
       return;
     }
