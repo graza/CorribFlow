@@ -166,6 +166,18 @@ export default {
       } else if (text.startsWith('/flow')) {
         const flow = await getCachedFlow(env) || await fetchLatestFlow();
         await sendTelegramTo(env, chatId, flowSummary(flow.flowRate, flow.pastFlow, flow.datetime));
+      } else if (text.startsWith('/chart')) {
+        const { datetime, flowRate, pastFlow, series } = await fetchLatestFlow();
+        const form = new FormData();
+        const qcRes = await fetch('https://quickchart.io/chart', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chart: buildChartConfig(series), width: 500, height: 280, format: 'png', backgroundColor: 'white' }),
+        });
+        form.append('chat_id', String(chatId));
+        form.append('photo', new Blob([await qcRes.arrayBuffer()], { type: 'image/png' }), 'flow.png');
+        form.append('caption', flowSummary(flowRate, pastFlow, datetime));
+        await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendPhoto`, { method: 'POST', body: form });
       }
 
       return new Response('OK');
