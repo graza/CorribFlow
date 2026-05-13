@@ -59,6 +59,15 @@ The twice-daily trigger fires at four UTC hours to cover the DST boundary; the h
 | `alertState` | JSON array of thresholds currently crossed | none |
 | `subscribers` | JSON array of Telegram chat IDs | none |
 | `latestFlow` | `{datetime, flowRate, pastFlow}` from last cron run | 15 min |
+| `errors` | JSON array of last 10 errors: `{context, error, message, timestamp}` | none |
+
+To inspect recent errors:
+
+```sh
+npx wrangler kv key get --binding FLOW_KV errors
+```
+
+The `context` field identifies where the error occurred: `broadcastPhoto`, `/chart`, or `scheduled:<cron>` (e.g. `scheduled:*/15 * * * *`).
 
 ## Bot commands
 
