@@ -68,6 +68,13 @@ async function getCachedFlow(env) {
   return raw ? JSON.parse(raw) : null;
 }
 
+async function logError(env, context, err) {
+  const raw = await env.FLOW_KV.get('errors');
+  const errors = raw ? JSON.parse(raw) : [];
+  errors.unshift({ context, error: err?.message ?? String(err), timestamp: new Date().toISOString() });
+  await env.FLOW_KV.put('errors', JSON.stringify(errors.slice(0, 10)));
+}
+
 async function broadcast(env, message) {
   const subscribers = await getSubscribers(env);
   await Promise.all(subscribers.map(chatId => sendTelegramTo(env, chatId, message)));
@@ -77,13 +84,27 @@ async function broadcastPhoto(env, caption, chartConfig) {
   const subscribers = await getSubscribers(env);
   if (subscribers.length === 0) return;
 
-  // Fetch chart image once, then send to all subscribers
-  const qcRes = await fetch('https://quickchart.io/chart', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chart: chartConfig, width: 500, height: 280, format: 'png', backgroundColor: 'white' }),
-  });
-  const imageData = await qcRes.arrayBuffer();
+  // Fetch chart image once; fall back to text broadcast if QuickChart fails
+  let imageData = null;
+  try {
+    const qcRes = await fetch('https://quickchart.io/chart', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chart: chartConfig, width: 500, height: 280, format: 'png', backgroundColor: 'white' }),
+    });
+    if (qcRes.ok) {
+      imageData = await qcRes.arrayBuffer();
+    } else {
+      await logError(env, 'broadcastPhoto', new Error(`QuickChart ${qcRes.status}`));
+    }
+  } catch (err) {
+    await logError(env, 'broadcastPhoto', err);
+  }
+
+  if (!imageData) {
+    await broadcast(env, caption);
+    return;
+  }
 
   await Promise.all(subscribers.map(chatId => {
     const form = new FormData();
@@ -168,16 +189,28 @@ export default {
         await sendTelegramTo(env, chatId, flowSummary(flow.flowRate, flow.pastFlow, flow.datetime));
       } else if (text.startsWith('/chart')) {
         const { datetime, flowRate, pastFlow, series } = await fetchLatestFlow();
-        const form = new FormData();
-        const qcRes = await fetch('https://quickchart.io/chart', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chart: buildChartConfig(series), width: 500, height: 280, format: 'png', backgroundColor: 'white' }),
-        });
-        form.append('chat_id', String(chatId));
-        form.append('photo', new Blob([await qcRes.arrayBuffer()], { type: 'image/png' }), 'flow.png');
-        form.append('caption', flowSummary(flowRate, pastFlow, datetime));
-        await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendPhoto`, { method: 'POST', body: form });
+        const summary = flowSummary(flowRate, pastFlow, datetime);
+        let imageData = null;
+        try {
+          const qcRes = await fetch('https://quickchart.io/chart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chart: buildChartConfig(series), width: 500, height: 280, format: 'png', backgroundColor: 'white' }),
+          });
+          if (qcRes.ok) imageData = await qcRes.arrayBuffer();
+          else await logError(env, '/chart', new Error(`QuickChart ${qcRes.status}`));
+        } catch (err) {
+          await logError(env, '/chart', err);
+        }
+        if (imageData) {
+          const form = new FormData();
+          form.append('chat_id', String(chatId));
+          form.append('photo', new Blob([imageData], { type: 'image/png' }), 'flow.png');
+          form.append('caption', summary);
+          await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendPhoto`, { method: 'POST', body: form });
+        } else {
+          await sendTelegramTo(env, chatId, summary);
+        }
       }
 
       return new Response('OK');
@@ -232,7 +265,14 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    const { datetime, flowRate, pastFlow, series } = await fetchLatestFlow();
+    let flow;
+    try {
+      flow = await fetchLatestFlow();
+    } catch (err) {
+      await logError(env, `scheduled:${event.cron}`, err);
+      return;
+    }
+    const { datetime, flowRate, pastFlow, series } = flow;
     await env.FLOW_KV.put('latestFlow', JSON.stringify({ datetime, flowRate, pastFlow }), { expirationTtl: 900 });
 
     // Twice-daily summary at 5am and 3pm Dublin time (DST-aware)
