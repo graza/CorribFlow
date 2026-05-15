@@ -32,8 +32,8 @@ function parseCSVToMap(text) {
 async function fetchLatestFlow() {
   console.log('fetchLatestFlow: fetching CSVs');
   const [r1, r2] = await Promise.all([
-    fetch(`${UPSTREAM}/data/day/30089_OD.csv`, { headers: { Referer: UPSTREAM }, cf: { cacheEverything: false } }),
-    fetch(`${UPSTREAM}/data/day/30099_OD.csv`, { headers: { Referer: UPSTREAM }, cf: { cacheEverything: false } }),
+    fetch(`${UPSTREAM}/data/month/30089_OD.csv`, { headers: { Referer: UPSTREAM }, cf: { cacheEverything: false } }),
+    fetch(`${UPSTREAM}/data/month/30099_OD.csv`, { headers: { Referer: UPSTREAM }, cf: { cacheEverything: false } }),
   ]);
 
   console.log(`fetchLatestFlow: r1=${r1.status} r2=${r2.status}`);
