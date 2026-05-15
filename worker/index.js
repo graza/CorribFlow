@@ -32,8 +32,8 @@ function parseCSVToMap(text) {
 async function fetchLatestFlow() {
   console.log('fetchLatestFlow: fetching CSVs');
   const [r1, r2] = await Promise.all([
-    fetch(`${UPSTREAM}/data/day/30089_OD.csv`, { headers: { Referer: UPSTREAM } }),
-    fetch(`${UPSTREAM}/data/day/30099_OD.csv`, { headers: { Referer: UPSTREAM } }),
+    fetch(`${UPSTREAM}/data/day/30089_OD.csv`, { headers: { Referer: UPSTREAM }, cf: { cacheEverything: false } }),
+    fetch(`${UPSTREAM}/data/day/30099_OD.csv`, { headers: { Referer: UPSTREAM }, cf: { cacheEverything: false } }),
   ]);
 
   console.log(`fetchLatestFlow: r1=${r1.status} r2=${r2.status}`);
@@ -218,10 +218,15 @@ export default {
         await env.FLOW_KV.put('subscribers', JSON.stringify(updated));
         await sendTelegramTo(env, chatId, '🔕 Unsubscribed from Corrib flow alerts.');
       } else if (text.startsWith('/flow')) {
-        const flow = await getCachedFlow(env) || await fetchLatestFlow();
+        const cached = await getCachedFlow(env);
+        console.log(cached ? `flow: using KV cache datetime=${cached.datetime}` : 'flow: KV cache miss, fetching fresh');
+        const flow = cached || await fetchLatestFlow();
         await sendTelegramTo(env, chatId, flowSummary(flow.flowRate, flow.pastFlow, flow.datetime));
       } else if (text.startsWith('/chart')) {
-        const { datetime, flowRate, pastFlow, series } = await fetchLatestFlow();
+        const cached = await getCachedFlow(env);
+        const hasSeriesCache = cached?.series?.length > 0;
+        console.log(hasSeriesCache ? `chart: using KV cache datetime=${cached.datetime}` : 'chart: KV cache miss or no series, fetching fresh');
+        const { datetime, flowRate, pastFlow, series } = hasSeriesCache ? cached : await fetchLatestFlow();
         const summary = flowSummary(flowRate, pastFlow, datetime);
         let imageData = null;
         try {
@@ -313,7 +318,7 @@ export default {
     }
     const { datetime, flowRate, pastFlow, series } = flow;
     console.log(`scheduled: flowRate=${flowRate.toFixed(1)} datetime=${datetime}`);
-    await env.FLOW_KV.put('latestFlow', JSON.stringify({ datetime, flowRate, pastFlow }), { expirationTtl: 900 });
+    await env.FLOW_KV.put('latestFlow', JSON.stringify({ datetime, flowRate, pastFlow, series }), { expirationTtl: 900 });
 
     // Twice-daily summary at 5am and 3pm Dublin time (DST-aware)
     if (event.cron === '0 4,5,14,15 * * *') {
