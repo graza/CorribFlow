@@ -21,7 +21,10 @@ function parseCSVToMap(text) {
   const map = {};
   for (const row of text.trim().split('\n').slice(1)) {
     const comma = row.indexOf(',');
-    if (comma > 0) map[row.slice(0, comma)] = parseFloat(row.slice(comma + 1));
+    if (comma > 0) {
+      const val = parseFloat(row.slice(comma + 1));
+      if (!isNaN(val)) map[row.slice(0, comma)] = val;
+    }
   }
   return map;
 }
