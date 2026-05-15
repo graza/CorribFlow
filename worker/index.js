@@ -36,7 +36,12 @@ async function fetchLatestFlow() {
   console.log(`fetchLatestFlow: r1=${r1.status} r2=${r2.status}`);
   if (!r1.ok || !r2.ok) throw new Error(`Upstream error: ${r1.status} / ${r2.status}`);
 
-  const [map1, map2] = (await Promise.all([r1.text(), r2.text()])).map(parseCSVToMap);
+  const [t1, t2] = await Promise.all([r1.text(), r2.text()]);
+  const lastLine1 = t1.trim().split('\n').pop();
+  const lastLine2 = t2.trim().split('\n').pop();
+  console.log(`fetchLatestFlow: last row1=${JSON.stringify(lastLine1)}`);
+  console.log(`fetchLatestFlow: last row2=${JSON.stringify(lastLine2)}`);
+  const [map1, map2] = [t1, t2].map(parseCSVToMap);
   console.log(`fetchLatestFlow: map1=${Object.keys(map1).length} rows, map2=${Object.keys(map2).length} rows`);
 
   // Only use timestamps present in both CSVs, sorted chronologically
