@@ -79,7 +79,10 @@ async function getSubscribers(env) {
 
 async function getCachedFlow(env) {
   const raw = await env.FLOW_KV.get('latestFlow');
-  return raw ? JSON.parse(raw) : null;
+  if (!raw) return null;
+  const flow = JSON.parse(raw);
+  // Discard cache entries with invalid values from before the alignment fix
+  return (flow?.flowRate != null && isFinite(flow.flowRate)) ? flow : null;
 }
 
 async function logError(env, context, err) {
@@ -187,6 +190,7 @@ export default {
       const chatId = message?.chat?.id;
       const text = message?.text ?? '';
 
+      try {
       if (text.startsWith('/start')) {
         const subscribers = await getSubscribers(env);
         if (!subscribers.includes(chatId)) {
@@ -232,6 +236,10 @@ export default {
         } else {
           await sendTelegramTo(env, chatId, summary);
         }
+      }
+      } catch (err) {
+        console.error(`telegram webhook error: ${err.message}`);
+        await logError(env, 'telegram:webhook', err);
       }
 
       return new Response('OK');
