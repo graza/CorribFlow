@@ -17,35 +17,43 @@ const THRESHOLDS = [100, 150, 200, 250, 300, 350, 400, 450, 500];
 // repeated alerts when flow hovers near a boundary
 const HYSTERESIS = 10;
 
+function parseCSVToMap(text) {
+  const map = {};
+  for (const row of text.trim().split('\n').slice(1)) {
+    const comma = row.indexOf(',');
+    if (comma > 0) map[row.slice(0, comma)] = parseFloat(row.slice(comma + 1));
+  }
+  return map;
+}
+
 async function fetchLatestFlow() {
   const [r1, r2] = await Promise.all([
     fetch(`${UPSTREAM}/data/day/30089_OD.csv`, { headers: { Referer: UPSTREAM } }),
     fetch(`${UPSTREAM}/data/day/30099_OD.csv`, { headers: { Referer: UPSTREAM } }),
   ]);
-  const [t1, t2] = await Promise.all([r1.text(), r2.text()]);
 
-  const rows1 = t1.trim().split('\n');
-  const rows2 = t2.trim().split('\n');
+  if (!r1.ok || !r2.ok) throw new Error(`Upstream error: ${r1.status} / ${r2.status}`);
 
-  const lastRow1 = rows1[rows1.length - 1].split(',');
-  const lastRow2 = rows2[rows2.length - 1].split(',');
+  const [map1, map2] = (await Promise.all([r1.text(), r2.text()])).map(parseCSVToMap);
 
-  const datetime = lastRow1[0];
-  const flowRate = 254.65 * (parseFloat(lastRow1[1]) - parseFloat(lastRow2[1])) + 28.883;
+  // Only use timestamps present in both CSVs, sorted chronologically
+  const matched = Object.keys(map1)
+    .filter(dt => map2[dt] !== undefined)
+    .sort()
+    .map(dt => ({ datetime: dt, flow: 254.65 * (map1[dt] - map2[dt]) + 28.883 }));
 
-  // ~10 hours ago (40 readings back at 15-min intervals); index 1 skips header
-  const oldIdx = Math.max(1, rows1.length - 41);
-  const pastFlow = 254.65 * (parseFloat(rows1[oldIdx].split(',')[1]) - parseFloat(rows2[oldIdx].split(',')[1])) + 28.883;
+  if (matched.length === 0) throw new Error('No matching timestamps in CSV data');
 
-  // Last 12 hours of readings (48 x 15-min intervals) for chart
-  const seriesStart = Math.max(1, rows1.length - 48);
-  const series = [];
-  for (let i = seriesStart; i < rows1.length; i++) {
-    const f = 254.65 * (parseFloat(rows1[i].split(',')[1]) - parseFloat(rows2[i].split(',')[1])) + 28.883;
-    series.push({ label: rows1[i].split(',')[0].slice(11, 16), flow: Math.round(f) });
-  }
+  const latest = matched[matched.length - 1];
+  const pastIdx = Math.max(0, matched.length - 41); // ~10 hours ago
+  const seriesStart = Math.max(0, matched.length - 48); // last 12 hours
 
-  return { datetime, flowRate, pastFlow, series };
+  return {
+    datetime: latest.datetime,
+    flowRate: latest.flow,
+    pastFlow: matched[pastIdx].flow,
+    series: matched.slice(seriesStart).map(p => ({ label: p.datetime.slice(11, 16), flow: Math.round(p.flow) })),
+  };
 }
 
 async function sendTelegramTo(env, chatId, message) {
@@ -118,13 +126,20 @@ async function broadcastPhoto(env, caption, chartConfig) {
   }));
 }
 
+function timeAgo(datetime) {
+  const diffMin = Math.round((Date.now() - new Date(datetime.replace(' ', 'T') + 'Z')) / 60000);
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  return `${Math.floor(diffMin / 60)}h ${diffMin % 60}m ago`;
+}
+
 function flowSummary(flowRate, pastFlow, datetime) {
   const change = Math.round(flowRate - pastFlow);
   const trend = change > 3 ? '📈' : change < -3 ? '📉' : '➡️';
   const changeStr = change >= 0 ? `+${change}` : `−${Math.abs(change)}`;
   const nextThreshold = THRESHOLDS.find(t => t > flowRate);
-  const thresholdLine = nextThreshold ? `Next alert: ${nextThreshold} cumec` : `Above all thresholds`;
-  return `🌊 Corrib flow\n${flowRate.toFixed(0)} cumec ${trend} (${changeStr} over 10h)\n${thresholdLine}\n${datetime} UTC`;
+  const thresholdLine = nextThreshold ? `Next threshold: ${nextThreshold} cumec` : `Above all thresholds`;
+  return `🌊 Corrib flow\n${flowRate.toFixed(0)} cumec ${trend} (${changeStr} over 10h)\n${thresholdLine}\n${datetime} UTC (${timeAgo(datetime)})`;
 }
 
 function buildChartConfig(series) {
