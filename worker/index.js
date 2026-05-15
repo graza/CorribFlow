@@ -27,14 +27,17 @@ function parseCSVToMap(text) {
 }
 
 async function fetchLatestFlow() {
+  console.log('fetchLatestFlow: fetching CSVs');
   const [r1, r2] = await Promise.all([
     fetch(`${UPSTREAM}/data/day/30089_OD.csv`, { headers: { Referer: UPSTREAM } }),
     fetch(`${UPSTREAM}/data/day/30099_OD.csv`, { headers: { Referer: UPSTREAM } }),
   ]);
 
+  console.log(`fetchLatestFlow: r1=${r1.status} r2=${r2.status}`);
   if (!r1.ok || !r2.ok) throw new Error(`Upstream error: ${r1.status} / ${r2.status}`);
 
   const [map1, map2] = (await Promise.all([r1.text(), r2.text()])).map(parseCSVToMap);
+  console.log(`fetchLatestFlow: map1=${Object.keys(map1).length} rows, map2=${Object.keys(map2).length} rows`);
 
   // Only use timestamps present in both CSVs, sorted chronologically
   const matched = Object.keys(map1)
@@ -42,9 +45,12 @@ async function fetchLatestFlow() {
     .sort()
     .map(dt => ({ datetime: dt, flow: 254.65 * (map1[dt] - map2[dt]) + 28.883 }));
 
+  console.log(`fetchLatestFlow: ${matched.length} matched rows`);
   if (matched.length === 0) throw new Error('No matching timestamps in CSV data');
 
   const latest = matched[matched.length - 1];
+  console.log(`fetchLatestFlow: latest=${latest.datetime} flow=${latest.flow.toFixed(1)}`);
+
   const pastIdx = Math.max(0, matched.length - 41); // ~10 hours ago
   const seriesStart = Math.max(0, matched.length - 48); // last 12 hours
 
@@ -280,14 +286,17 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
+    console.log(`scheduled: cron=${event.cron}`);
     let flow;
     try {
       flow = await fetchLatestFlow();
     } catch (err) {
+      console.error(`scheduled: fetchLatestFlow failed: ${err.message}`);
       await logError(env, `scheduled:${event.cron}`, err);
       return;
     }
     const { datetime, flowRate, pastFlow, series } = flow;
+    console.log(`scheduled: flowRate=${flowRate.toFixed(1)} datetime=${datetime}`);
     await env.FLOW_KV.put('latestFlow', JSON.stringify({ datetime, flowRate, pastFlow }), { expirationTtl: 900 });
 
     // Twice-daily summary at 5am and 3pm Dublin time (DST-aware)
