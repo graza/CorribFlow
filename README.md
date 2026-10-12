@@ -12,7 +12,7 @@ GitHub Pages (index.md)
             └── proxies waterlevel.ie with CORS headers and 15-minute edge cache
             └── cron every 15 min → checks flow thresholds → Telegram alerts
             └── cron at 5am and 3pm Irish time → Telegram summary + QuickChart image
-            └── webhook → handles /start /stop /flow /chart bot commands
+            └── webhook → handles /start /stop /flow /chart /day /week /month /web bot commands
 ```
 
 **Cloudflare services used:** Workers (free tier), KV (state storage), Cron Triggers.  

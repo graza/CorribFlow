@@ -43,12 +43,33 @@ https://api.telegram.org/bot<TELEGRAM_TOKEN>/setWebhook?url=https://corrib-flow.
 
 Expected response: `{"ok":true,"result":true,"description":"Webhook was set"}`
 
+### 5. Register the bot command menu
+
+Run once (and again whenever commands change) so commands appear in Telegram's `/` menu:
+
+```sh
+curl -s https://api.telegram.org/bot<TELEGRAM_TOKEN>/setMyCommands \
+  -H 'Content-Type: application/json' \
+  -d '{"commands":[
+    {"command":"flow","description":"Current flow"},
+    {"command":"chart","description":"Chart since the last summary"},
+    {"command":"day","description":"Chart of the last 24 hours"},
+    {"command":"week","description":"Chart of the last 7 days"},
+    {"command":"month","description":"Chart of the last 30 days"},
+    {"command":"web","description":"Open the website"},
+    {"command":"start","description":"Subscribe to alerts and summaries"},
+    {"command":"stop","description":"Unsubscribe"}
+  ]}'
+```
+
+Expected response: `{"ok":true,"result":true}`
+
 ## Cron triggers
 
 | Schedule | Dublin time | Purpose |
 |---|---|---|
 | `*/15 * * * *` | every 15 min | Threshold crossing alerts |
-| `0 4,5,14,15 * * *` | 5am and 3pm (DST-aware) | Flow summary + 12h chart |
+| `0 4,5,14,15 * * *` | 5am and 3pm (DST-aware) | Flow summary + chart since the previous summary |
 
 The twice-daily trigger fires at four UTC hours to cover the DST boundary; the handler checks the Dublin local hour and exits early if it isn't 5 or 15.
 
@@ -58,7 +79,7 @@ The twice-daily trigger fires at four UTC hours to cover the DST boundary; the h
 |---|---|---|
 | `alertState` | JSON array of thresholds currently crossed | none |
 | `subscribers` | JSON array of Telegram chat IDs | none |
-| `latestFlow` | `{datetime, flowRate, pastFlow}` from last cron run | 15 min |
+| `latestFlow` | `{datetime, flowRate, smoothedFlow, pastFlow, series}` from last cron run (`series` is the last 24h of readings) | 15 min |
 | `errors` | JSON array of last 10 errors: `{context, error, timestamp}` | none |
 
 To inspect recent errors:
@@ -67,7 +88,7 @@ To inspect recent errors:
 npx wrangler kv key get --binding FLOW_KV errors
 ```
 
-The `context` field identifies where the error occurred: `broadcastPhoto`, `/chart`, or `scheduled:<cron>` (e.g. `scheduled:*/15 * * * *`).
+The `context` field identifies where the error occurred: `broadcastPhoto`, `/chart`, `/day`, `/week`, `/month`, `telegram:webhook`, or `scheduled:<cron>` (e.g. `scheduled:*/15 * * * *`).
 
 ## Bot commands
 
@@ -76,7 +97,13 @@ The `context` field identifies where the error occurred: `broadcastPhoto`, `/cha
 | `/start` | Subscribe (capped at 100 subscribers) |
 | `/stop` | Unsubscribe |
 | `/flow` | Reply with current flow (served from KV cache, 15 min max age) |
-| `/chart` | Reply with 12-hour flow chart image from QuickChart |
+| `/chart` | Chart since the last scheduled summary (minimum 12 hours) |
+| `/day` | Chart of the last 24 hours (15-min readings + moving average) |
+| `/week` | Chart of the last 7 days (hourly averages) |
+| `/month` | Chart of the last 30 days (6-hourly averages) |
+| `/web` | Link to the website |
+
+Charts are rendered by QuickChart and use rolling windows ending now, unlike the website's calendar-aligned periods. Captions show the 75-min moving average with the latest raw reading. Flow messages, charts and alerts carry an "Open website" button linking to the matching website view.
 
 The bot works in group chats as well as direct messages.
 

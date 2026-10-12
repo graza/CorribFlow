@@ -1,5 +1,6 @@
 const UPSTREAM = 'https://waterlevel.ie';
 const ALLOWED_ORIGIN = 'https://graza.github.io';
+const SITE_URL = `${ALLOWED_ORIGIN}/CorribFlow/`;
 const CACHE_TTL = 900; // 15 minutes, matching OPW's update interval
 
 const CORS_HEADERS = {
@@ -12,6 +13,19 @@ const VALID_PATH = /^\/data\/(day|week|month)\/\d+_OD\.csv$/;
 
 // Flow thresholds in cumec at which to alert, starting at 100 in steps of 50
 const THRESHOLDS = [100, 150, 200, 250, 300, 350, 400, 450, 500];
+
+// Readings per moving-average window (15-min interval, so 75 minutes)
+const SMOOTH_WINDOW = 5;
+
+// Twice-daily summary hours, Dublin time
+const REPORT_HOURS = [5, 15];
+
+// Rolling chart periods for /day, /week and /month, bucketed like the website
+const PERIODS = {
+  day: { label: 'Last 24 hours', hours: 24 },
+  week: { label: 'Last 7 days', hours: 7 * 24, bucketMinutes: 60, tickFormat: 'ddd D' },
+  month: { label: 'Last 30 days', hours: 30 * 24, bucketMinutes: 360, tickFormat: 'D MMM' },
+};
 
 // Downward crossing fires this many cumec below the threshold to avoid
 // repeated alerts when flow hovers near a boundary
@@ -29,7 +43,8 @@ function parseCSVToMap(text) {
   return map;
 }
 
-async function fetchLatestFlow() {
+// Fetch the month CSVs and return all matched readings with smoothed values
+async function fetchMatched() {
   console.log('fetchLatestFlow: fetching CSVs');
   const [r1, r2] = await Promise.all([
     fetch(`${UPSTREAM}/data/month/30089_OD.csv`, { headers: { Referer: UPSTREAM }, cache: 'no-store' }),
@@ -59,23 +74,73 @@ async function fetchLatestFlow() {
   const latest = matched[matched.length - 1];
   console.log(`fetchLatestFlow: latest=${latest.datetime} flow=${latest.flow.toFixed(1)}`);
 
-  const pastIdx = Math.max(0, matched.length - 41); // ~10 hours ago
-  const seriesStart = Math.max(0, matched.length - 48); // last 12 hours
+  // Smooth over the full month so every charted point has a complete window
+  const smoothed = movingAverage(matched.map(p => p.flow), SMOOTH_WINDOW);
+  return matched.map((p, i) => ({ ...p, smooth: smoothed[i] }));
+}
 
+function summariseFlow(matched) {
+  const latest = matched[matched.length - 1];
+  const pastIdx = Math.max(0, matched.length - 41); // ~10 hours ago
   return {
     datetime: latest.datetime,
     flowRate: latest.flow,
-    pastFlow: matched[pastIdx].flow,
-    series: matched.slice(seriesStart).map(p => ({ label: p.datetime.slice(11, 16), flow: Math.round(p.flow) })),
+    smoothedFlow: latest.smooth,
+    pastFlow: matched[pastIdx].smooth,
+    series: matched.slice(-96), // last 24 hours; charts trim further
   };
 }
 
-async function sendTelegramTo(env, chatId, message) {
+async function fetchLatestFlow() {
+  return summariseFlow(await fetchMatched());
+}
+
+// Inline keyboard button linking to the website view matching the message
+function websiteButton(view) {
+  return { inline_keyboard: [[{ text: '🌐 Open website', url: `${SITE_URL}?view=${view}` }]] };
+}
+
+// Pass `view` (day/week/month) to add a website button to the message
+async function sendTelegramTo(env, chatId, message, view) {
+  const body = { chat_id: chatId, text: message };
+  if (view) body.reply_markup = websiteButton(view);
   await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text: message }),
+    body: JSON.stringify(body),
   });
+}
+
+async function sendPhotoTo(env, chatId, imageData, caption, view) {
+  const form = new FormData();
+  form.append('chat_id', String(chatId));
+  form.append('photo', new Blob([imageData], { type: 'image/png' }), 'flow.png');
+  form.append('caption', caption);
+  form.append('reply_markup', JSON.stringify(websiteButton(view)));
+  await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendPhoto`, { method: 'POST', body: form });
+}
+
+// Render a chart image via QuickChart; returns null (after logging) on failure
+async function renderChart(env, context, chartConfig) {
+  try {
+    const qcRes = await fetch('https://quickchart.io/chart', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chart: chartConfig, width: 500, height: 280, format: 'png', backgroundColor: 'white' }),
+    });
+    if (qcRes.ok) return await qcRes.arrayBuffer();
+    await logError(env, context, new Error(`QuickChart ${qcRes.status}`));
+  } catch (err) {
+    await logError(env, context, err);
+  }
+  return null;
+}
+
+// Send a chart with caption, falling back to text if the chart can't be rendered
+async function sendChartTo(env, chatId, context, caption, chartConfig, view) {
+  const imageData = await renderChart(env, context, chartConfig);
+  if (imageData) await sendPhotoTo(env, chatId, imageData, caption, view);
+  else await sendTelegramTo(env, chatId, caption, view);
 }
 
 const SUBSCRIBER_LIMIT = 100;
@@ -89,8 +154,8 @@ async function getCachedFlow(env) {
   const raw = await env.FLOW_KV.get('latestFlow');
   if (!raw) return null;
   const flow = JSON.parse(raw);
-  // Discard cache entries with invalid values from before the alignment fix
-  return (flow?.flowRate != null && isFinite(flow.flowRate)) ? flow : null;
+  // Discard cache entries with invalid values or from before smoothing was added
+  return (flow?.flowRate != null && isFinite(flow.flowRate) && flow.smoothedFlow != null) ? flow : null;
 }
 
 async function logError(env, context, err) {
@@ -100,72 +165,134 @@ async function logError(env, context, err) {
   await env.FLOW_KV.put('errors', JSON.stringify(errors.slice(0, 10)));
 }
 
-async function broadcast(env, message) {
+async function broadcast(env, message, view) {
   const subscribers = await getSubscribers(env);
-  await Promise.all(subscribers.map(chatId => sendTelegramTo(env, chatId, message)));
+  await Promise.all(subscribers.map(chatId => sendTelegramTo(env, chatId, message, view)));
 }
 
-async function broadcastPhoto(env, caption, chartConfig) {
+async function broadcastPhoto(env, caption, chartConfig, view) {
   const subscribers = await getSubscribers(env);
   if (subscribers.length === 0) return;
 
   // Fetch chart image once; fall back to text broadcast if QuickChart fails
-  let imageData = null;
-  try {
-    const qcRes = await fetch('https://quickchart.io/chart', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chart: chartConfig, width: 500, height: 280, format: 'png', backgroundColor: 'white' }),
-    });
-    if (qcRes.ok) {
-      imageData = await qcRes.arrayBuffer();
-    } else {
-      await logError(env, 'broadcastPhoto', new Error(`QuickChart ${qcRes.status}`));
-    }
-  } catch (err) {
-    await logError(env, 'broadcastPhoto', err);
-  }
-
+  const imageData = await renderChart(env, 'broadcastPhoto', chartConfig);
   if (!imageData) {
-    await broadcast(env, caption);
+    await broadcast(env, caption, view);
     return;
   }
 
-  await Promise.all(subscribers.map(chatId => {
-    const form = new FormData();
-    form.append('chat_id', String(chatId));
-    form.append('photo', new Blob([imageData], { type: 'image/png' }), 'flow.png');
-    form.append('caption', caption);
-    return fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendPhoto`, {
-      method: 'POST',
-      body: form,
-    });
-  }));
+  await Promise.all(subscribers.map(chatId => sendPhotoTo(env, chatId, imageData, caption, view)));
+}
+
+function parseUTC(datetime) {
+  return Date.parse(datetime.replace(' ', 'T') + 'Z');
 }
 
 function timeAgo(datetime) {
-  const diffMin = Math.round((Date.now() - new Date(datetime.replace(' ', 'T') + 'Z')) / 60000);
+  const diffMin = Math.round((Date.now() - parseUTC(datetime)) / 60000);
   if (diffMin < 1) return 'just now';
   if (diffMin < 60) return `${diffMin}m ago`;
   return `${Math.floor(diffMin / 60)}h ${diffMin % 60}m ago`;
 }
 
-function flowSummary(flowRate, pastFlow, datetime) {
-  const change = Math.round(flowRate - pastFlow);
+// `extraLine` (optional) is inserted after the latest reading
+function flowSummary({ flowRate, smoothedFlow, pastFlow, datetime }, extraLine) {
+  const change = Math.round(smoothedFlow - pastFlow);
   const trend = change > 3 ? '📈' : change < -3 ? '📉' : '➡️';
   const changeStr = change >= 0 ? `+${change}` : `−${Math.abs(change)}`;
+  // Thresholds use the raw reading, matching the alert logic
   const nextThreshold = THRESHOLDS.find(t => t > flowRate);
   const thresholdLine = nextThreshold ? `Next threshold: ${nextThreshold} cumec` : `Above all thresholds`;
-  return `🌊 Corrib flow\n${flowRate.toFixed(0)} cumec ${trend} (${changeStr} over 10h)\n${thresholdLine}\n${datetime} UTC (${timeAgo(datetime)})`;
+  return `🌊 Corrib flow\n${smoothedFlow.toFixed(0)} cumec ${trend} (${changeStr} over 10h)\nLatest reading: ${flowRate.toFixed(0)} cumec\n${extraLine ? `${extraLine}\n` : ''}${thresholdLine}\n${datetime} UTC (${timeAgo(datetime)})`;
 }
 
-function buildChartConfig(series) {
+function dublinHour(date) {
+  return parseInt(
+    new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Dublin', hour: 'numeric', hour12: false }).format(date)
+  );
+}
+
+// Most recent scheduled report time at or before `before`
+function lastReportTime(before) {
+  const t = new Date(before);
+  t.setUTCMinutes(0, 0, 0);
+  for (let i = 0; i < 48 && !REPORT_HOURS.includes(dublinHour(t)); i++) {
+    t.setTime(t.getTime() - 3600000);
+  }
+  return t.getTime();
+}
+
+// Chart from an hour before the given report time, but never less than 12 hours
+function chartStart(reportTime) {
+  return Math.min(reportTime - 3600000, Date.now() - 12 * 3600000);
+}
+
+function movingAverage(data, windowSize) {
+  return data.map((_, i) => {
+    const subset = data.slice(Math.max(0, i - windowSize + 1), i + 1);
+    return subset.reduce((s, v) => s + v, 0) / subset.length;
+  });
+}
+
+function buildChartConfig(fullSeries, startTime) {
+  const series = fullSeries.filter(p => parseUTC(p.datetime) >= startTime);
   return {
     type: 'line',
     data: {
-      labels: series.map(p => p.label),
+      labels: series.map(p => p.datetime.slice(11, 16)),
       datasets: [{
+        label: 'Reading',
         data: series.map(p => p.flow),
+        borderColor: 'rgba(54, 162, 235, 0.35)',
+        fill: false,
+        pointRadius: 0,
+        borderWidth: 1,
+        lineTension: 0,
+      }, {
+        label: `${SMOOTH_WINDOW * 15}-min average`,
+        data: series.map(p => p.smooth),
+        borderColor: 'rgb(54, 162, 235)',
+        backgroundColor: 'rgba(54, 162, 235, 0.1)',
+        fill: true,
+        pointRadius: 0,
+        borderWidth: 2,
+        lineTension: 0.3,
+      }],
+    },
+    options: {
+      legend: { labels: { boxWidth: 12, fontSize: 11 } },
+      scales: {
+        xAxes: [{ ticks: { maxTicksLimit: 7, fontSize: 11 } }],
+        yAxes: [{ ticks: { beginAtZero: false }, scaleLabel: { display: true, labelString: 'cumec' } }],
+      },
+    },
+  };
+}
+
+// Smoothed min–max over the charted points, e.g. "Last 7 days: 60–95 cumec"
+function rangeLine(label, points) {
+  const values = points.map(p => p.smooth);
+  return `${label}: ${Math.min(...values).toFixed(0)}–${Math.max(...values).toFixed(0)} cumec`;
+}
+
+// Average readings into fixed-size UTC buckets, keyed by bucket start time
+function bucketAverage(points, bucketMs) {
+  const buckets = new Map();
+  for (const p of points) {
+    const key = Math.floor(parseUTC(p.datetime) / bucketMs) * bucketMs;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(p.flow);
+  }
+  return [...buckets].map(([t, flows]) => ({ t, flow: flows.reduce((s, v) => s + v, 0) / flows.length }));
+}
+
+function buildPeriodChartConfig(points, { bucketMinutes, tickFormat }) {
+  const buckets = bucketAverage(points, bucketMinutes * 60000);
+  return {
+    type: 'line',
+    data: {
+      datasets: [{
+        data: buckets.map(b => ({ x: new Date(b.t).toISOString(), y: b.flow })),
         borderColor: 'rgb(54, 162, 235)',
         backgroundColor: 'rgba(54, 162, 235, 0.1)',
         fill: true,
@@ -177,11 +304,34 @@ function buildChartConfig(series) {
     options: {
       legend: { display: false },
       scales: {
-        xAxes: [{ ticks: { maxTicksLimit: 7, fontSize: 11 } }],
+        xAxes: [{
+          type: 'time',
+          time: { unit: 'day', displayFormats: { day: tickFormat } },
+          ticks: { maxTicksLimit: 7, maxRotation: 0, fontSize: 11 },
+        }],
         yAxes: [{ ticks: { beginAtZero: false }, scaleLabel: { display: true, labelString: 'cumec' } }],
       },
     },
   };
+}
+
+// Reply to /day, /week or /month with a rolling chart ending now
+async function sendPeriodChart(env, chatId, view) {
+  const period = PERIODS[view];
+  const startTime = Date.now() - period.hours * 3600000;
+  let flow, points, chartConfig;
+  if (view === 'day') {
+    // 24 hours fits in the cached series
+    flow = await getCachedFlow(env) || await fetchLatestFlow();
+    points = flow.series.filter(p => parseUTC(p.datetime) >= startTime);
+    chartConfig = buildChartConfig(points, startTime);
+  } else {
+    const matched = await fetchMatched();
+    flow = summariseFlow(matched);
+    points = matched.filter(p => parseUTC(p.datetime) >= startTime);
+    chartConfig = buildPeriodChartConfig(points, period);
+  }
+  await sendChartTo(env, chatId, `/${view}`, flowSummary(flow, rangeLine(period.label, points)), chartConfig, view);
 }
 
 export default {
@@ -221,34 +371,22 @@ export default {
         const cached = await getCachedFlow(env);
         console.log(cached ? `flow: using KV cache datetime=${cached.datetime}` : 'flow: KV cache miss, fetching fresh');
         const flow = cached || await fetchLatestFlow();
-        await sendTelegramTo(env, chatId, flowSummary(flow.flowRate, flow.pastFlow, flow.datetime));
+        await sendTelegramTo(env, chatId, flowSummary(flow), 'day');
       } else if (text.startsWith('/chart')) {
         const cached = await getCachedFlow(env);
         const hasSeriesCache = cached?.series?.length > 0;
         console.log(hasSeriesCache ? `chart: using KV cache datetime=${cached.datetime}` : 'chart: KV cache miss or no series, fetching fresh');
-        const { datetime, flowRate, pastFlow, series } = hasSeriesCache ? cached : await fetchLatestFlow();
-        const summary = flowSummary(flowRate, pastFlow, datetime);
-        let imageData = null;
-        try {
-          const qcRes = await fetch('https://quickchart.io/chart', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chart: buildChartConfig(series), width: 500, height: 280, format: 'png', backgroundColor: 'white' }),
-          });
-          if (qcRes.ok) imageData = await qcRes.arrayBuffer();
-          else await logError(env, '/chart', new Error(`QuickChart ${qcRes.status}`));
-        } catch (err) {
-          await logError(env, '/chart', err);
-        }
-        if (imageData) {
-          const form = new FormData();
-          form.append('chat_id', String(chatId));
-          form.append('photo', new Blob([imageData], { type: 'image/png' }), 'flow.png');
-          form.append('caption', summary);
-          await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendPhoto`, { method: 'POST', body: form });
-        } else {
-          await sendTelegramTo(env, chatId, summary);
-        }
+        const flow = hasSeriesCache ? cached : await fetchLatestFlow();
+        const chartConfig = buildChartConfig(flow.series, chartStart(lastReportTime(Date.now())));
+        await sendChartTo(env, chatId, '/chart', flowSummary(flow), chartConfig, 'day');
+      } else if (text.startsWith('/day')) {
+        await sendPeriodChart(env, chatId, 'day');
+      } else if (text.startsWith('/week')) {
+        await sendPeriodChart(env, chatId, 'week');
+      } else if (text.startsWith('/month')) {
+        await sendPeriodChart(env, chatId, 'month');
+      } else if (text.startsWith('/web')) {
+        await sendTelegramTo(env, chatId, '🌐 Corrib flow website: charts, history and previous periods.', 'day');
       }
       } catch (err) {
         console.error(`telegram webhook error: ${err.message}`);
@@ -316,17 +454,16 @@ export default {
       await logError(env, `scheduled:${event.cron}`, err);
       return;
     }
-    const { datetime, flowRate, pastFlow, series } = flow;
-    console.log(`scheduled: flowRate=${flowRate.toFixed(1)} datetime=${datetime}`);
-    await env.FLOW_KV.put('latestFlow', JSON.stringify({ datetime, flowRate, pastFlow, series }), { expirationTtl: 900 });
+    const { datetime, flowRate } = flow;
+    console.log(`scheduled: flowRate=${flowRate.toFixed(1)} smoothed=${flow.smoothedFlow.toFixed(1)} datetime=${datetime}`);
+    await env.FLOW_KV.put('latestFlow', JSON.stringify(flow), { expirationTtl: 900 });
 
     // Twice-daily summary at 5am and 3pm Dublin time (DST-aware)
     if (event.cron === '0 4,5,14,15 * * *') {
-      const dublinHour = parseInt(
-        new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Dublin', hour: 'numeric', hour12: false }).format(new Date())
-      );
-      if (dublinHour === 5 || dublinHour === 15) {
-        await broadcastPhoto(env, flowSummary(flowRate, pastFlow, datetime), buildChartConfig(series));
+      if (REPORT_HOURS.includes(dublinHour(new Date()))) {
+        // Previous report, looking back from before this one
+        const since = lastReportTime(Date.now() - 3600000);
+        await broadcastPhoto(env, flowSummary(flow), buildChartConfig(flow.series, chartStart(since)), 'day');
       }
       return;
     }
@@ -360,7 +497,7 @@ export default {
     await env.FLOW_KV.put('alertState', JSON.stringify([...crossed]));
 
     for (const alert of alerts) {
-      await broadcast(env, alert);
+      await broadcast(env, alert, 'day');
     }
   },
 };
