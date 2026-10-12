@@ -82,6 +82,12 @@ The twice-daily trigger fires at four UTC hours to cover the DST boundary; the h
 | `latestFlow` | `{datetime, flowRate, smoothedFlow, pastFlow, series}` from last cron run (`series` is the last 24h of readings) | 15 min |
 | `errors` | JSON array of last 10 errors: `{context, error, timestamp}` | none |
 
+Keys shared with other projects live in a separate namespace, `SHARED_KV` (`07563ec612644de4b37cf418ea35e6bb`), so they can be bound without exposing the keys above:
+
+| Key | Contents | TTL |
+|---|---|---|
+| `latest` | `{flow_m3s, observed_at}` for Slipside: smoothed flow, ISO 8601 UTC time. Shared contract with Slipside; change both together | none |
+
 To inspect recent errors:
 
 ```sh

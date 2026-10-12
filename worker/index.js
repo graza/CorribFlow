@@ -457,6 +457,12 @@ export default {
     const { datetime, flowRate } = flow;
     console.log(`scheduled: flowRate=${flowRate.toFixed(1)} smoothed=${flow.smoothedFlow.toFixed(1)} datetime=${datetime}`);
     await env.FLOW_KV.put('latestFlow', JSON.stringify(flow), { expirationTtl: 900 });
+    // Contract for Slipside: no TTL, so the last reading survives an outage.
+    // Lives in SHARED_KV so Slipside can't reach FLOW_KV's subscribers or alert state.
+    await env.SHARED_KV.put('latest', JSON.stringify({
+      flow_m3s: flow.smoothedFlow,
+      observed_at: new Date(parseUTC(datetime)).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    }));
 
     // Twice-daily summary at 5am and 3pm Dublin time (DST-aware)
     if (event.cron === '0 4,5,14,15 * * *') {

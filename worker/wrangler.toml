@@ -8,3 +8,8 @@ crons = ["*/15 * * * *", "0 4,5,14,15 * * *"]
 [[kv_namespaces]]
 binding = "FLOW_KV"
 id = "4522f882e5cc442bb4a166a9a2840e2f"
+
+# Keys shared with other projects (Slipside reads `latest`); keep private state in FLOW_KV
+[[kv_namespaces]]
+binding = "SHARED_KV"
+id = "07563ec612644de4b37cf418ea35e6bb"
