@@ -460,7 +460,7 @@ export default {
     // Contract for Slipside: no TTL, so the last reading survives an outage.
     // Lives in SHARED_KV so Slipside can't reach FLOW_KV's subscribers or alert state.
     await env.SHARED_KV.put('latest', JSON.stringify({
-      flow_m3s: flow.smoothedFlow,
+      flow_m3s: Math.round(flow.smoothedFlow * 10) / 10,
       observed_at: new Date(parseUTC(datetime)).toISOString().replace(/\.\d{3}Z$/, 'Z'),
     }));
 
